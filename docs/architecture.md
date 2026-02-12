@@ -10,6 +10,8 @@
 - Converts user goals to plans
 - Enforces policy decisions
 - Executes approved steps with timeline logging
+- Runs background reminder notification worker
+- Coordinates voice command pipeline and model management
 
 3. Planning Layer (`friday/planner.py`)
 - Rule-based intent extraction for deterministic offline behavior
@@ -28,19 +30,34 @@
 - Local Ollama-compatible generation
 - Fallback output if local model is unavailable
 
-7. Storage Layer (`friday/storage.py`)
+7. Model Ops Layer (`friday/model_manager.py`)
+- Local model discovery, pull, and metadata operations
+
+8. Voice Layer (`friday/voice.py`)
+- Upload handling, STT adapter, TTS adapter, wake-word checks
+- Command-based integration with local binaries (`whisper.cpp`, `Piper`)
+
+9. Retrieval Layer (`friday/code_context.py`)
+- Lightweight repository context ranking for code tasks
+- Returns file citations and snippets for grounding
+
+10. Code Workflow Layer (`friday/code_workflow.py`)
+- Generates unified diff proposals for coding tasks
+- Feeds repo context into local model for Codex-style patch suggestions
+
+11. Storage Layer (`friday/storage.py`)
 - SQLite for reminders and history
 
-8. Event Layer (`friday/events.py`)
+12. Event Layer (`friday/events.py`)
 - In-memory async pub/sub for action timeline streaming
 
 ## Data flow
 
-1. Client sends request (`/v1/chat` or `/v1/plan`)
+1. Client sends request (`/v1/chat`, `/v1/plan`, `/v1/voice/*`, `/v1/models*`)
 2. Planner creates structured steps
 3. Policy evaluates each step
 4. Client approves risky steps
 5. Orchestrator executes tools in sequence
 6. Timeline events stream through `/v1/events`
 7. Run status retrievable from `/v1/actions/{run_id}`
-
+8. Reminder worker emits `reminder.due` when due reminders are detected

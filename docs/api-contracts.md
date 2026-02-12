@@ -17,14 +17,14 @@ Response:
 
 ```json
 {
-  "reply": "Plan created with 1 step(s).",
+  "reply": "Plan created with 1 step(s). Approval required for steps: none.",
   "citations": [],
   "plan": {
     "id": "plan_123",
     "goal": "open notepad",
     "mode": "action",
     "status": "draft",
-    "created_at": "2026-02-12T12:00:00Z",
+    "created_at": "2026-02-12T12:00:00+00:00",
     "steps": []
   },
   "run_id": null
@@ -33,52 +33,11 @@ Response:
 
 ## `POST /v1/plan`
 
-Request:
-
-```json
-{
-  "goal": "set a reminder in 20 minutes to drink water",
-  "mode": "action",
-  "context": {}
-}
-```
-
-Response:
-
-```json
-{
-  "id": "plan_123",
-  "goal": "set a reminder in 20 minutes to drink water",
-  "mode": "action",
-  "status": "draft",
-  "created_at": "2026-02-12T12:00:00Z",
-  "steps": []
-}
-```
+Creates a plan and returns structured steps with risk/approval fields.
 
 ## `POST /v1/actions/execute`
 
-Request:
-
-```json
-{
-  "plan_id": "plan_123",
-  "approved_steps": ["step_1"]
-}
-```
-
-Response:
-
-```json
-{
-  "id": "run_123",
-  "plan_id": "plan_123",
-  "status": "completed",
-  "started_at": "2026-02-12T12:00:03Z",
-  "finished_at": "2026-02-12T12:00:05Z",
-  "timeline": []
-}
-```
+Runs only approved plan steps.
 
 ## `GET /v1/actions/{run_id}`
 
@@ -87,6 +46,143 @@ Returns action run status and timeline.
 ## `GET /v1/tools`
 
 Returns tool metadata and JSON input schema for UI integration.
+
+## `GET /v1/models`
+
+Returns discovered local Ollama models.
+
+Response:
+
+```json
+{
+  "models": [],
+  "count": 0
+}
+```
+
+## `POST /v1/models/pull`
+
+Request:
+
+```json
+{
+  "model": "qwen2.5:7b-instruct"
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "message": "success",
+  "model": "qwen2.5:7b-instruct"
+}
+```
+
+## `GET /v1/models/{model_name}`
+
+Returns model metadata from Ollama show API.
+
+## `POST /v1/code/propose_patch`
+
+Request:
+
+```json
+{
+  "task": "add structured logging to planner",
+  "path": "friday/planner.py"
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "proposal": "diff --git a/friday/planner.py b/friday/planner.py ...",
+  "citations": ["friday/planner.py"],
+  "message": null
+}
+```
+
+## `POST /v1/voice/transcribe`
+
+Multipart upload:
+
+- `file`: audio file (or `.txt` fallback file)
+
+Response:
+
+```json
+{
+  "transcript": "open calculator",
+  "backend": "command",
+  "warning": null
+}
+```
+
+## `POST /v1/voice/speak`
+
+Request:
+
+```json
+{
+  "text": "Hello from FRIDAY"
+}
+```
+
+Response:
+
+```json
+{
+  "audio_path": "data/voice/out/reply_abc.wav",
+  "backend": "command",
+  "warning": null
+}
+```
+
+## `POST /v1/voice/command`
+
+Multipart form:
+
+- `file`: audio input (or `.txt` fallback)
+- `mode`: `chat|action|code`
+- `session_id`: string
+
+Response:
+
+```json
+{
+  "transcript": "set reminder in 10 minutes",
+  "reply": "Plan created with 1 step(s).",
+  "plan": null,
+  "run_id": null,
+  "audio_path": "data/voice/out/reply_xyz.wav",
+  "stt_backend": "command",
+  "tts_backend": "command",
+  "warnings": []
+}
+```
+
+## `POST /v1/voice/wakeword/check`
+
+Request:
+
+```json
+{
+  "text": "hey friday open vscode"
+}
+```
+
+Response:
+
+```json
+{
+  "detected": true,
+  "wake_words": ["friday", "jarvis"]
+}
+```
 
 ## `WS /v1/events`
 
@@ -98,4 +194,4 @@ Streams runtime events:
 - `step.success`
 - `step.failed`
 - `run.finished`
-
+- `reminder.due`

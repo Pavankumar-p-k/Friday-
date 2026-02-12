@@ -53,5 +53,16 @@ Quality bar:
 - Endpoints must be working.
 - Tool schemas and policy behavior must be testable.
 - Documentation must be sufficient for another engineer to continue immediately.
-```
 
+Current baseline already includes:
+- planning/execution APIs and websocket timeline
+- model management APIs
+- voice command pipeline endpoints with command-based adapters
+- safety policy and allowlisted tools
+- test suite
+
+Next milestone after this baseline:
+- realtime microphone streaming
+- patch proposal/apply loop for code mode
+- richer retrieval and evaluation dashboards
+```
