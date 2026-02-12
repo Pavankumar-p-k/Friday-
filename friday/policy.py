@@ -91,6 +91,15 @@ class PolicyEngine:
                     needs_approval=True,
                     reason="Shell command is missing.",
                 )
+            lowered = f" {command.lower()} "
+            for term in self.settings.blocked_shell_terms:
+                if term.lower() in lowered:
+                    return PolicyDecision(
+                        allowed=False,
+                        risk=RiskLevel.HIGH,
+                        needs_approval=True,
+                        reason="Shell command contains blocked term.",
+                    )
             for prefix in self.settings.allowed_shell_prefixes:
                 if command.lower().startswith(prefix.lower()):
                     return PolicyDecision(

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
+from pathlib import Path
 import uuid
 from typing import Any
 
 from friday.config import Settings
+from friday.code_workflow import CodeWorkflow
 from friday.events import InMemoryEventBus
 from friday.llm import LocalLLMClient
+from friday.model_manager import ModelManager
 from friday.planner import Planner
 from friday.policy import PolicyEngine
 from friday.schemas import (
@@ -21,10 +25,12 @@ from friday.schemas import (
     RunStatus,
     RunStepEvent,
     StepStatus,
+    VoiceCommandResponse,
     utc_now_iso,
 )
 from friday.storage import Storage
 from friday.tools.registry import ToolRegistry, build_default_registry
+from friday.voice import VoicePipeline
 
 
 class Orchestrator:
@@ -33,17 +39,42 @@ class Orchestrator:
         self.storage = Storage(self.settings.db_path)
         self.events = InMemoryEventBus()
         self.llm = LocalLLMClient(self.settings)
+        self.code_workflow = CodeWorkflow(self.settings, self.llm)
         self.policy = PolicyEngine(self.settings)
         self.planner = Planner(self.settings, self.policy)
         self.registry: ToolRegistry = build_default_registry(self.settings, self.storage, self.llm)
+        self.model_manager = ModelManager(self.settings)
+        self.voice = VoicePipeline(self.settings)
 
         self._plans: dict[str, Plan] = {}
         self._runs: dict[str, ActionRun] = {}
         self._lock = asyncio.Lock()
 
+        self._running = False
+        self._reminder_task: asyncio.Task[None] | None = None
+
+    async def start_background_workers(self) -> None:
+        if self._running:
+            return
+        self._running = True
+        self._reminder_task = asyncio.create_task(self._reminder_due_worker())
+
+    async def stop_background_workers(self) -> None:
+        self._running = False
+        if self._reminder_task is None:
+            return
+        self._reminder_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await self._reminder_task
+        self._reminder_task = None
+
     async def chat(self, request: ChatRequest) -> ChatResponse:
         if request.mode == AssistantMode.CHAT:
-            reply = await self.llm.generate(request.text, mode=AssistantMode.CHAT)
+            prompt = self._chat_prompt_with_history(
+                session_id=request.session_id,
+                user_text=request.text,
+            )
+            reply = await self.llm.generate(prompt, mode=AssistantMode.CHAT)
             self.storage.save_history(request.session_id, request.text, reply, request.mode.value)
             return ChatResponse(reply=reply, citations=[])
 
@@ -255,8 +286,98 @@ class Orchestrator:
         async with self._lock:
             return self._runs.get(run_id)
 
+    async def list_models(self) -> list[dict[str, Any]]:
+        return await self.model_manager.list_models()
+
+    async def pull_model(self, model_name: str) -> dict[str, Any]:
+        return await self.model_manager.pull_model(model_name)
+
+    async def show_model(self, model_name: str) -> dict[str, Any]:
+        return await self.model_manager.show_model(model_name)
+
+    async def propose_patch(self, task: str, path: str | None = None) -> dict[str, object]:
+        return await self.code_workflow.propose_patch(task=task, path=path)
+
+    async def transcribe_audio(self, audio_path: Path) -> dict[str, str]:
+        return await self.voice.transcribe(audio_path)
+
+    async def synthesize_text(self, text: str) -> dict[str, str]:
+        return await self.voice.synthesize(text)
+
+    async def process_voice_command(
+        self,
+        audio_path: Path,
+        session_id: str = "default",
+        mode: AssistantMode = AssistantMode.ACTION,
+    ) -> VoiceCommandResponse:
+        stt = await self.transcribe_audio(audio_path)
+        transcript = stt.get("text", "").strip()
+        warnings: list[str] = []
+        if stt.get("warning"):
+            warnings.append(str(stt["warning"]))
+
+        if not transcript:
+            return VoiceCommandResponse(
+                transcript="",
+                reply="Could not transcribe audio.",
+                audio_path="",
+                stt_backend=stt.get("backend", "none"),
+                tts_backend="none",
+                warnings=warnings or ["transcription failed"],
+            )
+
+        response = await self.chat(
+            ChatRequest(
+                session_id=session_id,
+                text=transcript,
+                mode=mode,
+                context={},
+            )
+        )
+        tts = await self.synthesize_text(response.reply)
+        if tts.get("warning"):
+            warnings.append(str(tts["warning"]))
+
+        return VoiceCommandResponse(
+            transcript=transcript,
+            reply=response.reply,
+            plan=response.plan,
+            run_id=response.run_id,
+            audio_path=tts.get("audio_path", ""),
+            stt_backend=stt.get("backend", "none"),
+            tts_backend=tts.get("backend", "none"),
+            warnings=warnings,
+        )
+
     def list_tools(self) -> list[dict[str, Any]]:
         return self.registry.list_tools()
+
+    def _chat_prompt_with_history(self, session_id: str, user_text: str) -> str:
+        recent = self.storage.list_recent_history(session_id=session_id, limit=4)
+        if not recent:
+            return user_text
+        lines = ["Recent conversation context (oldest -> newest):"]
+        for item in reversed(recent):
+            lines.append(f"User: {item['user_text']}")
+            lines.append(f"Assistant: {item['assistant_text']}")
+        lines.append(f"User: {user_text}")
+        return "\n".join(lines)
+
+    async def _reminder_due_worker(self) -> None:
+        while self._running:
+            now_iso = utc_now_iso()
+            due = self.storage.list_due_unnotified(before_iso=now_iso)
+            for item in due:
+                reminder_id = int(item["id"])
+                self.storage.mark_reminder_notified(reminder_id)
+                await self.events.publish(
+                    {
+                        "type": "reminder.due",
+                        "timestamp": utc_now_iso(),
+                        "reminder": item,
+                    }
+                )
+            await asyncio.sleep(max(3, self.settings.reminder_poll_interval_sec))
 
     def _add_timeline(
         self,
@@ -284,4 +405,3 @@ class Orchestrator:
             f"Run {run.id} finished with status '{run.status.value}'. "
             f"Successful steps: {success_count}, failed/blocked: {failure_count}."
         )
-

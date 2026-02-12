@@ -27,6 +27,13 @@ class SafeShellTool(Tool):
         if not command:
             return ToolExecutionResult(success=False, message="Missing command.")
 
+        if self._contains_blocked_term(command, context.settings.blocked_shell_terms):
+            return ToolExecutionResult(
+                success=False,
+                message="Command blocked: contains blocked term.",
+                data={"command": command},
+            )
+
         if not self._is_allowed(command, context.settings.allowed_shell_prefixes):
             return ToolExecutionResult(
                 success=False,
@@ -67,3 +74,9 @@ class SafeShellTool(Tool):
                 return True
         return False
 
+    def _contains_blocked_term(self, command: str, blocked_terms: tuple[str, ...]) -> bool:
+        lowered = f" {command.lower()} "
+        for term in blocked_terms:
+            if term.lower() in lowered:
+                return True
+        return False

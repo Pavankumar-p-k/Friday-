@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from friday.code_context import CodeContextIndex
 from friday.schemas import AssistantMode, ToolExecutionResult
 from friday.tools.base import Tool, ToolContext
 
@@ -32,13 +33,28 @@ class CodeAgentTool(Tool):
             return ToolExecutionResult(success=False, message="Missing task.")
 
         context_snippet = ""
+        citations: list[str] = []
         if path:
             candidate = Path(path)
             if candidate.exists() and candidate.is_file():
                 try:
                     context_snippet = candidate.read_text(encoding="utf-8")[:2000]
+                    try:
+                        citations = [str(candidate.resolve().relative_to(context.settings.workspace_root.resolve()))]
+                    except Exception:
+                        citations = [str(candidate)]
                 except Exception:
                     context_snippet = ""
+                    citations = []
+        else:
+            index = CodeContextIndex(context.settings)
+            matches = index.search(task)
+            if matches:
+                citations = [match.path for match in matches]
+                joined = []
+                for match in matches:
+                    joined.append(f"FILE: {match.path}\n{match.snippet}")
+                context_snippet = "\n\n".join(joined)
 
         prompt = (
             f"Task:\n{task}\n\n"
@@ -53,6 +69,10 @@ class CodeAgentTool(Tool):
         return ToolExecutionResult(
             success=True,
             message="Code guidance generated.",
-            data={"task": task, "language": language, "output": answer},
+            data={
+                "task": task,
+                "language": language,
+                "output": answer,
+                "citations": citations,
+            },
         )
-
