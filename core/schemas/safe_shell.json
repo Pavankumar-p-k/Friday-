@@ -1,0 +1,18 @@
+{
+  "name": "safe_shell",
+  "description": "Execute allowlisted shell commands with approval.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "command": {
+        "type": "string"
+      },
+      "timeout_sec": {
+        "type": "integer"
+      }
+    },
+    "required": ["command"],
+    "additionalProperties": false
+  }
+}
+

@@ -1,0 +1,27 @@
+{
+  "name": "code_agent",
+  "description": "Generate code assistance and engineering guidance.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "task": {
+        "type": "string"
+      },
+      "language": {
+        "type": "string"
+      },
+      "path": {
+        "type": "string"
+      },
+      "write_files": {
+        "type": "boolean"
+      },
+      "run_shell": {
+        "type": "boolean"
+      }
+    },
+    "required": ["task"],
+    "additionalProperties": false
+  }
+}
+

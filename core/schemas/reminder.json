@@ -1,0 +1,25 @@
+{
+  "name": "reminder",
+  "description": "Set, list, and complete reminders.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["set", "list", "complete"]
+      },
+      "note": {
+        "type": "string"
+      },
+      "due_at": {
+        "type": "string"
+      },
+      "reminder_id": {
+        "type": "integer"
+      }
+    },
+    "required": ["action"],
+    "additionalProperties": false
+  }
+}
+
