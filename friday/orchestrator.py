@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 import uuid
 from typing import Any
@@ -33,6 +34,18 @@ from friday.tools.registry import ToolRegistry, build_default_registry
 from friday.voice import VoicePipeline
 
 
+@dataclass
+class VoiceSessionState:
+    session_id: str
+    mode: AssistantMode
+    interrupted: bool = False
+    last_partial: str = ""
+    updated_at: str = ""
+
+    def touch(self) -> None:
+        self.updated_at = utc_now_iso()
+
+
 class Orchestrator:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings.from_env()
@@ -48,6 +61,7 @@ class Orchestrator:
 
         self._plans: dict[str, Plan] = {}
         self._runs: dict[str, ActionRun] = {}
+        self._voice_sessions: dict[str, VoiceSessionState] = {}
         self._lock = asyncio.Lock()
 
         self._running = False
@@ -298,6 +312,9 @@ class Orchestrator:
     async def propose_patch(self, task: str, path: str | None = None) -> dict[str, object]:
         return await self.code_workflow.propose_patch(task=task, path=path)
 
+    async def apply_patch(self, patch: str, dry_run: bool = True) -> dict[str, object]:
+        return await self.code_workflow.apply_patch(patch=patch, dry_run=dry_run)
+
     async def transcribe_audio(self, audio_path: Path) -> dict[str, str]:
         return await self.voice.transcribe(audio_path)
 
@@ -326,28 +343,123 @@ class Orchestrator:
                 warnings=warnings or ["transcription failed"],
             )
 
+        response = await self.process_voice_text(
+            transcript=transcript,
+            session_id=session_id,
+            mode=mode,
+        )
+        response.stt_backend = stt.get("backend", "none")
+        response.warnings = [*warnings, *response.warnings]
+        return response
+
+    async def process_voice_text(
+        self,
+        transcript: str,
+        session_id: str = "default",
+        mode: AssistantMode = AssistantMode.ACTION,
+    ) -> VoiceCommandResponse:
+        text = transcript.strip()
+        if not text:
+            return VoiceCommandResponse(
+                transcript="",
+                reply="No transcript text provided.",
+                warnings=["empty transcript"],
+            )
+
+        state = await self.register_voice_session(session_id=session_id, mode=mode)
+        state.interrupted = False
+        state.last_partial = ""
+        state.touch()
+
         response = await self.chat(
             ChatRequest(
                 session_id=session_id,
-                text=transcript,
+                text=text,
                 mode=mode,
                 context={},
             )
         )
+
+        if await self.is_voice_interrupted(session_id):
+            await self.clear_voice_interrupt(session_id)
+            return VoiceCommandResponse(
+                transcript=text,
+                reply=response.reply,
+                plan=response.plan,
+                run_id=response.run_id,
+                audio_path="",
+                tts_backend="none",
+                interrupted=True,
+                warnings=["interrupted before speech output"],
+            )
+
         tts = await self.synthesize_text(response.reply)
+        warnings: list[str] = []
         if tts.get("warning"):
             warnings.append(str(tts["warning"]))
 
         return VoiceCommandResponse(
-            transcript=transcript,
+            transcript=text,
             reply=response.reply,
             plan=response.plan,
             run_id=response.run_id,
             audio_path=tts.get("audio_path", ""),
-            stt_backend=stt.get("backend", "none"),
             tts_backend=tts.get("backend", "none"),
             warnings=warnings,
         )
+
+    async def register_voice_session(
+        self,
+        session_id: str,
+        mode: AssistantMode = AssistantMode.ACTION,
+    ) -> VoiceSessionState:
+        async with self._lock:
+            existing = self._voice_sessions.get(session_id)
+            if existing is not None:
+                existing.mode = mode
+                existing.touch()
+                return existing
+            state = VoiceSessionState(session_id=session_id, mode=mode, updated_at=utc_now_iso())
+            self._voice_sessions[session_id] = state
+            return state
+
+    async def close_voice_session(self, session_id: str) -> None:
+        async with self._lock:
+            self._voice_sessions.pop(session_id, None)
+
+    async def set_voice_partial(self, session_id: str, text: str) -> VoiceSessionState:
+        state = await self.register_voice_session(session_id=session_id)
+        state.last_partial = text
+        state.touch()
+        return state
+
+    async def interrupt_voice_session(self, session_id: str) -> VoiceSessionState:
+        state = await self.register_voice_session(session_id=session_id)
+        state.interrupted = True
+        state.touch()
+        await self.events.publish(
+            {
+                "type": "voice.interrupted",
+                "timestamp": utc_now_iso(),
+                "session_id": session_id,
+            }
+        )
+        return state
+
+    async def clear_voice_interrupt(self, session_id: str) -> None:
+        async with self._lock:
+            state = self._voice_sessions.get(session_id)
+            if state is None:
+                return
+            state.interrupted = False
+            state.touch()
+
+    async def is_voice_interrupted(self, session_id: str) -> bool:
+        async with self._lock:
+            state = self._voice_sessions.get(session_id)
+            if state is None:
+                return False
+            return state.interrupted
 
     def list_tools(self) -> list[dict[str, Any]]:
         return self.registry.list_tools()
@@ -405,3 +517,4 @@ class Orchestrator:
             f"Run {run.id} finished with status '{run.status.value}'. "
             f"Successful steps: {success_count}, failed/blocked: {failure_count}."
         )
+

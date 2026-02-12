@@ -146,6 +146,7 @@ class VoiceCommandResponse(BaseModel):
     audio_path: str = ""
     stt_backend: str = ""
     tts_backend: str = ""
+    interrupted: bool = False
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -159,3 +160,15 @@ class PatchProposalResponse(BaseModel):
     proposal: str
     citations: list[str] = Field(default_factory=list)
     message: str | None = None
+
+
+class PatchApplyRequest(BaseModel):
+    patch: str = Field(min_length=1)
+    dry_run: bool = True
+
+
+class PatchApplyResponse(BaseModel):
+    ok: bool
+    applied: bool
+    dry_run: bool
+    message: str
