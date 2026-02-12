@@ -35,3 +35,4 @@ data/voice/*
 !data/voice/.gitkeep
 logs/
 models/**/*.gguf
+apps/jarvis-bridge/
