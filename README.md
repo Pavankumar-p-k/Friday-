@@ -23,6 +23,16 @@ This repository is built as an industry-style backend foundation that you can co
   - `GET /v1/models`
   - `POST /v1/models/pull`
   - `GET /v1/models/{model_name}`
+  - `GET /v1/jarvis/state`
+  - `POST /v1/jarvis/run-command`
+  - `POST /v1/jarvis/set-mode`
+  - `POST /v1/jarvis/complete-reminder`
+  - `POST /v1/jarvis/replay-command`
+  - `POST /v1/jarvis/generate-briefing`
+  - `POST /v1/jarvis/reload-plugins`
+  - `POST /v1/jarvis/set-automation-enabled`
+  - `POST /v1/jarvis/set-plugin-enabled`
+  - `POST /v1/jarvis/terminate-process`
   - `POST /v1/code/propose_patch`
   - `POST /v1/code/apply_patch`
   - `POST /v1/voice/transcribe`
@@ -45,6 +55,7 @@ This repository is built as an industry-style backend foundation that you can co
 - Repo-aware code context retrieval with file citations
 - Codex-style patch proposal endpoint (unified diff suggestion)
 - Patch dry-run/apply endpoint for approval-based code edits
+- Jarvis UI compatibility API for existing Electron contracts
 - Local LLM client (Ollama-compatible) with safe fallback when model is unavailable
 - Voice pipeline adapter with command-based STT/TTS integration and fallback modes
 - Live voice WebSocket flow with partial/final messages and `barge_in` support
@@ -117,6 +128,17 @@ If these commands are not set, FRIDAY uses fallback behavior:
 - safe shell tool enforces allowed prefixes and blocked-term denylist
 - action timeline records every step status
 - reminder due events are emitted over websocket
+
+## Jarvis UI bridge integration
+
+Your existing Desktop UI can be reused without editing the original folder.
+
+```powershell
+cd C:\Users\Pavan\AppData\Roaming\Friday-
+.\scripts\prepare_jarvis_ui_bridge.ps1
+```
+
+This creates `apps/jarvis-bridge` as a copy, replaces preload with an HTTP bridge, and keeps `C:\Users\Pavan\Desktop\jarvis` untouched.
 
 ## Suggested next upgrades
 

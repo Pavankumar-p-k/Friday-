@@ -61,6 +61,7 @@ Current baseline already includes:
 - live voice websocket channel with barge-in support
 - safety policy and allowlisted tools
 - test suite
+- jarvis desktop compatibility endpoints for existing UI contracts
 
 Next milestone after this baseline:
 - realtime microphone streaming from device

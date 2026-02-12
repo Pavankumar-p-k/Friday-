@@ -47,10 +47,14 @@
 - Generates unified diff proposals for coding tasks
 - Feeds repo context into local model for Codex-style patch suggestions
 
-11. Storage Layer (`friday/storage.py`)
+11. Jarvis Compatibility Layer (`friday/jarvis_compat.py`)
+- Exposes Desktop Jarvis-style command/state contract on REST endpoints
+- Lets existing Electron UI reuse FRIDAY backend without changing source folder
+
+12. Storage Layer (`friday/storage.py`)
 - SQLite for reminders and history
 
-12. Event Layer (`friday/events.py`)
+13. Event Layer (`friday/events.py`)
 - In-memory async pub/sub for action timeline streaming
 
 ## Data flow

@@ -17,6 +17,7 @@
 - reminder due-event background worker (implemented)
 - better code agent patch flow (`propose diff`) (implemented)
 - patch approval/apply workflow backend endpoint (implemented)
+- Jarvis Desktop contract compatibility endpoints (implemented)
 - UI-level patch review/approval screens (pending)
 - UI action timeline with retries and undo (pending)
 

@@ -84,6 +84,100 @@ Response:
 
 Returns model metadata from Ollama show API.
 
+## Jarvis Compatibility Endpoints
+
+These endpoints mirror the Desktop Jarvis `window.jarvisApi` contract.
+
+### `GET /v1/jarvis/state`
+
+Returns Jarvis-shaped state object:
+
+- `mode`, `telemetry`, `reminders`, `alarms`
+- `routines`, `memory`, `suggestions`
+- `commandHistory`, `automations`, `plugins`
+
+### `POST /v1/jarvis/run-command`
+
+Request:
+
+```json
+{
+  "command": "open chrome",
+  "bypass_confirmation": false
+}
+```
+
+Response:
+
+```json
+{
+  "result": {
+    "ok": true,
+    "message": "..."
+  },
+  "state": {}
+}
+```
+
+### `POST /v1/jarvis/set-mode`
+
+```json
+{
+  "mode": "focus"
+}
+```
+
+### `POST /v1/jarvis/complete-reminder`
+
+```json
+{
+  "id": "1"
+}
+```
+
+### `POST /v1/jarvis/replay-command`
+
+```json
+{
+  "id": "cmd_xxx"
+}
+```
+
+### `POST /v1/jarvis/generate-briefing`
+
+Returns morning briefing payload.
+
+### `POST /v1/jarvis/reload-plugins`
+
+Reloads plugin manifests from `FRIDAY_JARVIS_PLUGINS_DIR`.
+
+### `POST /v1/jarvis/set-automation-enabled`
+
+```json
+{
+  "id": "auto_morning_work",
+  "enabled": true
+}
+```
+
+### `POST /v1/jarvis/set-plugin-enabled`
+
+```json
+{
+  "plugin_id": "plugin-id",
+  "enabled": false
+}
+```
+
+### `POST /v1/jarvis/terminate-process`
+
+```json
+{
+  "pid": 1234,
+  "bypass_confirmation": true
+}
+```
+
 ## `POST /v1/code/propose_patch`
 
 Request:
