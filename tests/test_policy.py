@@ -40,3 +40,14 @@ def test_safe_shell_requires_allowlisted_prefix(tmp_path: Path) -> None:
     assert decision.allowed is True
     assert decision.needs_approval is True
 
+
+def test_safe_shell_blocks_dangerous_term(tmp_path: Path) -> None:
+    policy = PolicyEngine(_settings(tmp_path))
+    step = PlanStep(
+        id="s1",
+        description="Run dangerous command",
+        tool="safe_shell",
+        args={"command": "echo hi && shutdown /s /t 0"},
+    )
+    decision = policy.evaluate(step)
+    assert decision.allowed is False
