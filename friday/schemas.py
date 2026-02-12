@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from pydantic import BaseModel, Field
 
 
 def utc_now_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat()
 
 
 class AssistantMode(str, Enum):
@@ -116,4 +116,3 @@ class ToolExecutionResult(BaseModel):
     success: bool
     message: str
     data: dict[str, Any] = Field(default_factory=dict)
-

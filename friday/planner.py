@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import re
 import uuid
 
@@ -136,7 +136,7 @@ class Planner:
 
     def _extract_reminder_payload(self, text: str) -> tuple[str, str]:
         lowered = text.lower()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         due = now + timedelta(minutes=30)
         note = text
 
@@ -158,7 +158,7 @@ class Planner:
 
         if not note:
             note = "Reminder"
-        return note, due.isoformat() + "Z"
+        return note, due.isoformat()
 
     def _extract_media_target(self, text: str) -> str:
         lowered = text.lower()
