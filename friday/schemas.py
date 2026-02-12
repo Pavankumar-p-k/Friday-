@@ -116,3 +116,46 @@ class ToolExecutionResult(BaseModel):
     success: bool
     message: str
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+class ModelPullRequest(BaseModel):
+    model: str = Field(min_length=1)
+
+
+class VoiceSpeakRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+
+class VoiceTranscriptionResponse(BaseModel):
+    transcript: str
+    backend: str
+    warning: str | None = None
+
+
+class VoiceSpeakResponse(BaseModel):
+    audio_path: str
+    backend: str
+    warning: str | None = None
+
+
+class VoiceCommandResponse(BaseModel):
+    transcript: str
+    reply: str
+    plan: Plan | None = None
+    run_id: str | None = None
+    audio_path: str = ""
+    stt_backend: str = ""
+    tts_backend: str = ""
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PatchProposalRequest(BaseModel):
+    task: str = Field(min_length=1)
+    path: str | None = None
+
+
+class PatchProposalResponse(BaseModel):
+    ok: bool
+    proposal: str
+    citations: list[str] = Field(default_factory=list)
+    message: str | None = None
