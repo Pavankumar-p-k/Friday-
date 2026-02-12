@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 
@@ -14,6 +15,8 @@ from friday.schemas import (
     ChatResponse,
     ExecuteRequest,
     ModelPullRequest,
+    PatchApplyRequest,
+    PatchApplyResponse,
     PatchProposalRequest,
     PatchProposalResponse,
     Plan,
@@ -37,7 +40,7 @@ def create_app() -> FastAPI:
         finally:
             await orchestrator.stop_background_workers()
 
-    app = FastAPI(title=settings.app_name, version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title=settings.app_name, version="0.3.0", lifespan=lifespan)
     app.state.orchestrator = orchestrator
 
     @app.get("/health")
@@ -102,6 +105,20 @@ def create_app() -> FastAPI:
             message=str(result.get("message")) if result.get("message") else None,
         )
 
+    @app.post("/v1/code/apply_patch", response_model=PatchApplyResponse)
+    async def apply_patch(payload: PatchApplyRequest) -> PatchApplyResponse:
+        orchestrator: Orchestrator = app.state.orchestrator
+        result = await orchestrator.apply_patch(
+            patch=payload.patch,
+            dry_run=payload.dry_run,
+        )
+        return PatchApplyResponse(
+            ok=bool(result.get("ok", False)),
+            applied=bool(result.get("applied", False)),
+            dry_run=bool(result.get("dry_run", payload.dry_run)),
+            message=str(result.get("message", "")),
+        )
+
     @app.post("/v1/voice/transcribe", response_model=VoiceTranscriptionResponse)
     async def voice_transcribe(file: UploadFile = File(...)) -> VoiceTranscriptionResponse:
         orchestrator: Orchestrator = app.state.orchestrator
@@ -137,11 +154,112 @@ def create_app() -> FastAPI:
             mode=mode,
         )
 
+    @app.post("/v1/voice/interrupt")
+    async def voice_interrupt(payload: dict[str, str]) -> dict[str, object]:
+        orchestrator: Orchestrator = app.state.orchestrator
+        session_id = payload.get("session_id", "default")
+        state = await orchestrator.interrupt_voice_session(session_id=session_id)
+        return {"ok": True, "session_id": state.session_id, "interrupted": state.interrupted}
+
     @app.post("/v1/voice/wakeword/check")
     async def wakeword_check(payload: VoiceSpeakRequest) -> dict[str, object]:
         orchestrator: Orchestrator = app.state.orchestrator
         detected = orchestrator.voice.wake_word_detected(payload.text)
         return {"detected": detected, "wake_words": list(orchestrator.settings.voice_wake_words)}
+
+    @app.websocket("/v1/voice/live")
+    async def voice_live(websocket: WebSocket) -> None:
+        orchestrator: Orchestrator = app.state.orchestrator
+        await websocket.accept()
+        session_id = f"live-{id(websocket)}"
+        mode = AssistantMode.ACTION
+        await orchestrator.register_voice_session(session_id=session_id, mode=mode)
+        await websocket.send_json(
+            {
+                "type": "session.started",
+                "session_id": session_id,
+                "mode": mode.value,
+            }
+        )
+
+        try:
+            while True:
+                message = await websocket.receive_json()
+                msg_type = str(message.get("type", "")).strip().lower()
+                if msg_type == "ping":
+                    await websocket.send_json({"type": "pong"})
+                    continue
+
+                if msg_type == "start":
+                    requested_session = str(message.get("session_id", session_id)).strip() or session_id
+                    requested_mode = _parse_mode(message.get("mode", mode.value))
+                    session_id = requested_session
+                    mode = requested_mode
+                    await orchestrator.register_voice_session(session_id=session_id, mode=mode)
+                    await websocket.send_json(
+                        {
+                            "type": "session.started",
+                            "session_id": session_id,
+                            "mode": mode.value,
+                        }
+                    )
+                    continue
+
+                if msg_type == "partial":
+                    text = str(message.get("text", ""))
+                    state = await orchestrator.set_voice_partial(session_id=session_id, text=text)
+                    await websocket.send_json(
+                        {
+                            "type": "partial.ack",
+                            "session_id": state.session_id,
+                            "text": state.last_partial,
+                        }
+                    )
+                    continue
+
+                if msg_type == "barge_in":
+                    state = await orchestrator.interrupt_voice_session(session_id=session_id)
+                    await websocket.send_json(
+                        {
+                            "type": "barge_in.ack",
+                            "session_id": state.session_id,
+                            "interrupted": state.interrupted,
+                        }
+                    )
+                    continue
+
+                if msg_type == "final":
+                    text = str(message.get("text", "")).strip()
+                    message_mode = _parse_mode(message.get("mode", mode.value))
+                    result = await orchestrator.process_voice_text(
+                        transcript=text,
+                        session_id=session_id,
+                        mode=message_mode,
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "final.result",
+                            "session_id": session_id,
+                            "payload": result.model_dump(),
+                        }
+                    )
+                    continue
+
+                if msg_type == "stop":
+                    await orchestrator.close_voice_session(session_id=session_id)
+                    await websocket.send_json({"type": "session.stopped", "session_id": session_id})
+                    return
+
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"unknown message type: {msg_type}",
+                    }
+                )
+        except WebSocketDisconnect:
+            pass
+        finally:
+            await orchestrator.close_voice_session(session_id=session_id)
 
     @app.websocket("/v1/events")
     async def events(websocket: WebSocket) -> None:
@@ -160,9 +278,19 @@ def create_app() -> FastAPI:
     return app
 
 
+def _parse_mode(value: Any) -> AssistantMode:
+    text = str(value).strip().lower()
+    if text == AssistantMode.CODE.value:
+        return AssistantMode.CODE
+    if text == AssistantMode.CHAT.value:
+        return AssistantMode.CHAT
+    return AssistantMode.ACTION
+
+
 async def _save_upload(orchestrator: Orchestrator, file: UploadFile) -> Path:
     content = await file.read()
     return orchestrator.voice.save_upload(file.filename or "audio.bin", content)
 
 
 app = create_app()
+
