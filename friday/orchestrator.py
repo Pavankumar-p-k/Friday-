@@ -10,6 +10,7 @@ from typing import Any
 from friday.config import Settings
 from friday.code_workflow import CodeWorkflow
 from friday.events import InMemoryEventBus
+from friday.jarvis_compat import JarvisCompatService
 from friday.llm import LocalLLMClient
 from friday.model_manager import ModelManager
 from friday.planner import Planner
@@ -58,6 +59,12 @@ class Orchestrator:
         self.registry: ToolRegistry = build_default_registry(self.settings, self.storage, self.llm)
         self.model_manager = ModelManager(self.settings)
         self.voice = VoicePipeline(self.settings)
+        self.jarvis = JarvisCompatService(
+            settings=self.settings,
+            storage=self.storage,
+            llm=self.llm,
+            orchestrator=self,
+        )
 
         self._plans: dict[str, Plan] = {}
         self._runs: dict[str, ActionRun] = {}
@@ -315,6 +322,48 @@ class Orchestrator:
     async def apply_patch(self, patch: str, dry_run: bool = True) -> dict[str, object]:
         return await self.code_workflow.apply_patch(patch=patch, dry_run=dry_run)
 
+    async def jarvis_get_state(self) -> dict[str, Any]:
+        return await self.jarvis.get_state()
+
+    async def jarvis_run_command(
+        self,
+        command: str,
+        bypass_confirmation: bool = False,
+    ) -> dict[str, Any]:
+        return await self.jarvis.run_command(command, bypass_confirmation=bypass_confirmation)
+
+    async def jarvis_set_mode(self, mode: str) -> dict[str, Any]:
+        return await self.jarvis.set_mode(mode)
+
+    async def jarvis_complete_reminder(self, reminder_id: str) -> dict[str, Any]:
+        return await self.jarvis.complete_reminder(reminder_id)
+
+    async def jarvis_replay_command(self, command_id: str) -> dict[str, Any]:
+        return await self.jarvis.replay_command(command_id)
+
+    async def jarvis_generate_briefing(self) -> dict[str, Any]:
+        return await self.jarvis.generate_briefing()
+
+    async def jarvis_reload_plugins(self) -> dict[str, Any]:
+        return await self.jarvis.reload_plugins()
+
+    async def jarvis_set_automation_enabled(
+        self,
+        automation_id: str,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        return await self.jarvis.set_automation_enabled(automation_id=automation_id, enabled=enabled)
+
+    async def jarvis_set_plugin_enabled(self, plugin_id: str, enabled: bool) -> dict[str, Any]:
+        return await self.jarvis.set_plugin_enabled(plugin_id=plugin_id, enabled=enabled)
+
+    async def jarvis_terminate_process(
+        self,
+        pid: int,
+        bypass_confirmation: bool = False,
+    ) -> dict[str, Any]:
+        return await self.jarvis.terminate_process(pid=pid, bypass_confirmation=bypass_confirmation)
+
     async def transcribe_audio(self, audio_path: Path) -> dict[str, str]:
         return await self.voice.transcribe(audio_path)
 
@@ -517,4 +566,3 @@ class Orchestrator:
             f"Run {run.id} finished with status '{run.status.value}'. "
             f"Successful steps: {success_count}, failed/blocked: {failure_count}."
         )
-

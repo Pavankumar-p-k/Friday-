@@ -172,3 +172,31 @@ class PatchApplyResponse(BaseModel):
     applied: bool
     dry_run: bool
     message: str
+
+
+class JarvisRunCommandRequest(BaseModel):
+    command: str = Field(min_length=1)
+    bypass_confirmation: bool = False
+
+
+class JarvisModeRequest(BaseModel):
+    mode: str = Field(min_length=1)
+
+
+class JarvisIdRequest(BaseModel):
+    id: str = Field(min_length=1)
+
+
+class JarvisAutomationToggleRequest(BaseModel):
+    id: str = Field(min_length=1)
+    enabled: bool
+
+
+class JarvisPluginToggleRequest(BaseModel):
+    plugin_id: str = Field(min_length=1)
+    enabled: bool
+
+
+class JarvisTerminateProcessRequest(BaseModel):
+    pid: int
+    bypass_confirmation: bool = False

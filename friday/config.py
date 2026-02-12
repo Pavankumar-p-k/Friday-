@@ -101,6 +101,7 @@ class Settings:
     voice_stt_command: str = ""
     voice_tts_command: str = ""
     voice_wake_words: tuple[str, ...] = ("friday", "jarvis")
+    jarvis_plugins_dir: Path = Path("plugins")
     allowed_apps: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -152,6 +153,10 @@ class Settings:
             voice_wake_words=_parse_csv(
                 os.getenv("FRIDAY_VOICE_WAKE_WORDS"),
                 base.voice_wake_words,
+            ),
+            jarvis_plugins_dir=_parse_path(
+                os.getenv("FRIDAY_JARVIS_PLUGINS_DIR"),
+                base.jarvis_plugins_dir,
             ),
             allowed_apps=_parse_allowed_apps(os.getenv("FRIDAY_ALLOWED_APPS")),
         )

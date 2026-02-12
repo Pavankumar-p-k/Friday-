@@ -14,6 +14,12 @@ from friday.schemas import (
     ChatRequest,
     ChatResponse,
     ExecuteRequest,
+    JarvisAutomationToggleRequest,
+    JarvisIdRequest,
+    JarvisModeRequest,
+    JarvisPluginToggleRequest,
+    JarvisRunCommandRequest,
+    JarvisTerminateProcessRequest,
     ModelPullRequest,
     PatchApplyRequest,
     PatchApplyResponse,
@@ -93,6 +99,70 @@ def create_app() -> FastAPI:
     async def show_model(model_name: str) -> dict[str, object]:
         orchestrator: Orchestrator = app.state.orchestrator
         return await orchestrator.show_model(model_name)
+
+    @app.get("/v1/jarvis/state")
+    async def jarvis_get_state() -> dict[str, object]:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.jarvis_get_state()
+
+    @app.post("/v1/jarvis/run-command")
+    async def jarvis_run_command(payload: JarvisRunCommandRequest) -> dict[str, object]:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.jarvis_run_command(
+            command=payload.command,
+            bypass_confirmation=payload.bypass_confirmation,
+        )
+
+    @app.post("/v1/jarvis/set-mode")
+    async def jarvis_set_mode(payload: JarvisModeRequest) -> dict[str, object]:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.jarvis_set_mode(mode=payload.mode)
+
+    @app.post("/v1/jarvis/complete-reminder")
+    async def jarvis_complete_reminder(payload: JarvisIdRequest) -> dict[str, object]:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.jarvis_complete_reminder(reminder_id=payload.id)
+
+    @app.post("/v1/jarvis/replay-command")
+    async def jarvis_replay_command(payload: JarvisIdRequest) -> dict[str, object]:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.jarvis_replay_command(command_id=payload.id)
+
+    @app.post("/v1/jarvis/generate-briefing")
+    async def jarvis_generate_briefing() -> dict[str, object]:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.jarvis_generate_briefing()
+
+    @app.post("/v1/jarvis/reload-plugins")
+    async def jarvis_reload_plugins() -> dict[str, object]:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.jarvis_reload_plugins()
+
+    @app.post("/v1/jarvis/set-automation-enabled")
+    async def jarvis_set_automation_enabled(
+        payload: JarvisAutomationToggleRequest,
+    ) -> dict[str, object]:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.jarvis_set_automation_enabled(
+            automation_id=payload.id,
+            enabled=payload.enabled,
+        )
+
+    @app.post("/v1/jarvis/set-plugin-enabled")
+    async def jarvis_set_plugin_enabled(payload: JarvisPluginToggleRequest) -> dict[str, object]:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.jarvis_set_plugin_enabled(
+            plugin_id=payload.plugin_id,
+            enabled=payload.enabled,
+        )
+
+    @app.post("/v1/jarvis/terminate-process")
+    async def jarvis_terminate_process(payload: JarvisTerminateProcessRequest) -> dict[str, object]:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.jarvis_terminate_process(
+            pid=payload.pid,
+            bypass_confirmation=payload.bypass_confirmation,
+        )
 
     @app.post("/v1/code/propose_patch", response_model=PatchProposalResponse)
     async def propose_patch(payload: PatchProposalRequest) -> PatchProposalResponse:
@@ -293,4 +363,3 @@ async def _save_upload(orchestrator: Orchestrator, file: UploadFile) -> Path:
 
 
 app = create_app()
-
