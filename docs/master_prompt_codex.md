@@ -58,11 +58,12 @@ Current baseline already includes:
 - planning/execution APIs and websocket timeline
 - model management APIs
 - voice command pipeline endpoints with command-based adapters
+- live voice websocket channel with barge-in support
 - safety policy and allowlisted tools
 - test suite
 
 Next milestone after this baseline:
-- realtime microphone streaming
-- patch proposal/apply loop for code mode
+- realtime microphone streaming from device
+- UI patch review/approval workflow for code mode
 - richer retrieval and evaluation dashboards
 ```

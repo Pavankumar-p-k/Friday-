@@ -95,6 +95,28 @@ Request:
 }
 ```
 
+## `POST /v1/code/apply_patch`
+
+Request:
+
+```json
+{
+  "patch": "diff --git a/file.py b/file.py ...",
+  "dry_run": true
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "applied": false,
+  "dry_run": true,
+  "message": "patch check passed (dry run)"
+}
+```
+
 Response:
 
 ```json
@@ -174,6 +196,44 @@ Request:
   "text": "hey friday open vscode"
 }
 ```
+
+## `POST /v1/voice/interrupt`
+
+Request:
+
+```json
+{
+  "session_id": "voice-session-1"
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "session_id": "voice-session-1",
+  "interrupted": true
+}
+```
+
+## `WS /v1/voice/live`
+
+Client messages:
+
+- `{"type":"start","session_id":"s1","mode":"action"}`
+- `{"type":"partial","text":"open note"}`
+- `{"type":"final","text":"open notepad","mode":"action"}`
+- `{"type":"barge_in"}`
+- `{"type":"stop"}`
+
+Server events:
+
+- `session.started`
+- `partial.ack`
+- `barge_in.ack`
+- `final.result`
+- `session.stopped`
 
 Response:
 

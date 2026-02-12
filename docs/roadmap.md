@@ -11,11 +11,13 @@
 ## V2 (in progress)
 
 - voice pipeline adapters wired to endpoints (implemented)
+- live voice websocket flow with interruption hooks (implemented)
 - model management endpoints (`list/pull/show`) (implemented)
 - repository context retrieval for code answers (implemented)
 - reminder due-event background worker (implemented)
 - better code agent patch flow (`propose diff`) (implemented)
-- patch approval/apply workflow (pending)
+- patch approval/apply workflow backend endpoint (implemented)
+- UI-level patch review/approval screens (pending)
 - UI action timeline with retries and undo (pending)
 
 ## V3

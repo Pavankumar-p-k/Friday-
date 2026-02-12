@@ -24,10 +24,13 @@ This repository is built as an industry-style backend foundation that you can co
   - `POST /v1/models/pull`
   - `GET /v1/models/{model_name}`
   - `POST /v1/code/propose_patch`
+  - `POST /v1/code/apply_patch`
   - `POST /v1/voice/transcribe`
   - `POST /v1/voice/command`
   - `POST /v1/voice/speak`
+  - `POST /v1/voice/interrupt`
   - `POST /v1/voice/wakeword/check`
+  - `WS /v1/voice/live`
   - `WS /v1/events`
 - Orchestrator with deterministic action planning and execution
 - Background reminder due-event worker (`reminder.due`)
@@ -41,8 +44,10 @@ This repository is built as an industry-style backend foundation that you can co
 - SQLite storage for reminders and chat history
 - Repo-aware code context retrieval with file citations
 - Codex-style patch proposal endpoint (unified diff suggestion)
+- Patch dry-run/apply endpoint for approval-based code edits
 - Local LLM client (Ollama-compatible) with safe fallback when model is unavailable
 - Voice pipeline adapter with command-based STT/TTS integration and fallback modes
+- Live voice WebSocket flow with partial/final messages and `barge_in` support
 - JSON schemas for tools in `core/schemas`
 - Tests for planner, policy, API, models, voice, and code-context behavior
 

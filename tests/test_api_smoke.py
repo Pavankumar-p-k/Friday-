@@ -43,3 +43,18 @@ def test_code_patch_proposal_endpoint(tmp_path: Path, monkeypatch) -> None:
     body = response.json()
     assert "ok" in body
     assert "proposal" in body
+
+
+def test_code_patch_apply_dry_run_endpoint(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("FRIDAY_DB_PATH", str(tmp_path / "api4.db"))
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/code/apply_patch",
+        json={"patch": "invalid patch", "dry_run": True},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dry_run"] is True
+    assert body["ok"] is False
