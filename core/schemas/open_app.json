@@ -1,0 +1,15 @@
+{
+  "name": "open_app",
+  "description": "Open allowlisted desktop applications.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "app_name": {
+        "type": "string"
+      }
+    },
+    "required": ["app_name"],
+    "additionalProperties": false
+  }
+}
+

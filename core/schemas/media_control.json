@@ -1,0 +1,19 @@
+{
+  "name": "media_control",
+  "description": "Play or control local media.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["play", "pause", "resume", "stop", "next", "previous"]
+      },
+      "target": {
+        "type": "string"
+      }
+    },
+    "required": ["action"],
+    "additionalProperties": false
+  }
+}
+
