@@ -150,6 +150,57 @@ class VoiceCommandResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class VoiceDispatchRequest(BaseModel):
+    session_id: str = Field(default="default", min_length=1)
+    transcript: str = Field(min_length=1)
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class VoiceDispatchAction(BaseModel):
+    tool: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    confidence: float = 0.0
+    reason: str = ""
+
+
+class VoiceDispatchResponse(BaseModel):
+    transcript: str
+    intent: str
+    mode: AssistantMode
+    reply: str
+    actions: list[VoiceDispatchAction] = Field(default_factory=list)
+    llm_backend: str
+    used_cloud_fallback: bool = False
+    local_attempts: int = 0
+    cloud_attempts: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
+class VoiceLoopStartRequest(BaseModel):
+    session_id: str = Field(default="voice-loop", min_length=1)
+    mode: AssistantMode = AssistantMode.ACTION
+    require_wake_word: bool = True
+    poll_interval_sec: int = Field(default=2, ge=1)
+
+
+class VoiceLoopStateResponse(BaseModel):
+    running: bool
+    session_id: str
+    mode: AssistantMode
+    require_wake_word: bool
+    poll_interval_sec: int
+    wake_words: list[str] = Field(default_factory=list)
+    processed_count: int = 0
+    skipped_count: int = 0
+    last_transcript: str = ""
+    last_command: str = ""
+    last_reply: str = ""
+    last_backend: str = ""
+    last_error: str = ""
+    started_at: str | None = None
+    updated_at: str | None = None
+
+
 class PatchProposalRequest(BaseModel):
     task: str = Field(min_length=1)
     path: str | None = None

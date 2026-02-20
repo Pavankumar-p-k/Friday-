@@ -10,6 +10,7 @@ from typing import Any
 from friday.config import Settings
 from friday.code_workflow import CodeWorkflow
 from friday.events import InMemoryEventBus
+from friday.hybrid_dispatcher import HybridAIDispatcher
 from friday.jarvis_compat import JarvisCompatService
 from friday.llm import LocalLLMClient
 from friday.model_manager import ModelManager
@@ -28,6 +29,9 @@ from friday.schemas import (
     RunStepEvent,
     StepStatus,
     VoiceCommandResponse,
+    VoiceDispatchAction,
+    VoiceDispatchResponse,
+    VoiceLoopStateResponse,
     utc_now_iso,
 )
 from friday.storage import Storage
@@ -47,6 +51,28 @@ class VoiceSessionState:
         self.updated_at = utc_now_iso()
 
 
+@dataclass
+class VoiceLoopState:
+    running: bool
+    session_id: str
+    mode: AssistantMode
+    require_wake_word: bool
+    poll_interval_sec: int
+    wake_words: tuple[str, ...]
+    processed_count: int = 0
+    skipped_count: int = 0
+    last_transcript: str = ""
+    last_command: str = ""
+    last_reply: str = ""
+    last_backend: str = ""
+    last_error: str = ""
+    started_at: str | None = None
+    updated_at: str = ""
+
+    def touch(self) -> None:
+        self.updated_at = utc_now_iso()
+
+
 class Orchestrator:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings.from_env()
@@ -59,6 +85,7 @@ class Orchestrator:
         self.registry: ToolRegistry = build_default_registry(self.settings, self.storage, self.llm)
         self.model_manager = ModelManager(self.settings)
         self.voice = VoicePipeline(self.settings)
+        self.dispatcher = HybridAIDispatcher(settings=self.settings, local_llm=self.llm)
         self.jarvis = JarvisCompatService(
             settings=self.settings,
             storage=self.storage,
@@ -69,18 +96,32 @@ class Orchestrator:
         self._plans: dict[str, Plan] = {}
         self._runs: dict[str, ActionRun] = {}
         self._voice_sessions: dict[str, VoiceSessionState] = {}
+        self._voice_loop_seen_files: set[str] = set()
+        self._voice_loop_state = VoiceLoopState(
+            running=False,
+            session_id=self.settings.voice_loop_session_id,
+            mode=self._assistant_mode_from_text(self.settings.voice_loop_mode),
+            require_wake_word=self.settings.voice_loop_require_wake_word,
+            poll_interval_sec=max(1, self.settings.voice_loop_poll_interval_sec),
+            wake_words=tuple(self.settings.voice_wake_words),
+            updated_at=utc_now_iso(),
+        )
         self._lock = asyncio.Lock()
 
         self._running = False
         self._reminder_task: asyncio.Task[None] | None = None
+        self._voice_loop_task: asyncio.Task[None] | None = None
 
     async def start_background_workers(self) -> None:
         if self._running:
             return
         self._running = True
         self._reminder_task = asyncio.create_task(self._reminder_due_worker())
+        if self.settings.voice_loop_auto_start:
+            await self.start_voice_loop()
 
     async def stop_background_workers(self) -> None:
+        await self.stop_voice_loop()
         self._running = False
         if self._reminder_task is None:
             return
@@ -370,6 +411,38 @@ class Orchestrator:
     async def synthesize_text(self, text: str) -> dict[str, str]:
         return await self.voice.synthesize(text)
 
+    async def dispatch_transcribed_speech(
+        self,
+        transcript: str,
+        session_id: str = "default",
+        context: dict[str, Any] | None = None,
+    ) -> VoiceDispatchResponse:
+        result = await self.dispatcher.dispatch(
+            transcript=transcript,
+            session_id=session_id,
+            context=context or {},
+        )
+        return VoiceDispatchResponse(
+            transcript=result.transcript,
+            intent=result.intent.value,
+            mode=result.mode,
+            reply=result.reply,
+            actions=[
+                VoiceDispatchAction(
+                    tool=item.tool,
+                    args=item.args,
+                    confidence=item.confidence,
+                    reason=item.reason,
+                )
+                for item in result.actions
+            ],
+            llm_backend=result.llm_backend,
+            used_cloud_fallback=result.used_cloud_fallback,
+            local_attempts=result.local_attempts,
+            cloud_attempts=result.cloud_attempts,
+            warnings=result.warnings,
+        )
+
     async def process_voice_command(
         self,
         audio_path: Path,
@@ -510,6 +583,86 @@ class Orchestrator:
                 return False
             return state.interrupted
 
+    async def start_voice_loop(
+        self,
+        session_id: str | None = None,
+        mode: AssistantMode | None = None,
+        require_wake_word: bool | None = None,
+        poll_interval_sec: int | None = None,
+    ) -> VoiceLoopStateResponse:
+        started = False
+        async with self._lock:
+            state = self._voice_loop_state
+            if session_id:
+                state.session_id = session_id
+            if mode is not None:
+                state.mode = mode
+            if require_wake_word is not None:
+                state.require_wake_word = require_wake_word
+            if poll_interval_sec is not None:
+                state.poll_interval_sec = max(1, int(poll_interval_sec))
+
+            if not state.running:
+                started = True
+                state.running = True
+                state.processed_count = 0
+                state.skipped_count = 0
+                state.last_transcript = ""
+                state.last_command = ""
+                state.last_reply = ""
+                state.last_backend = ""
+                state.last_error = ""
+                state.started_at = utc_now_iso()
+                state.touch()
+                self._voice_loop_seen_files = self._list_current_inbox_files()
+                self._voice_loop_task = asyncio.create_task(self._voice_loop_worker())
+            snapshot = self._voice_loop_snapshot_locked()
+
+        if started:
+            await self.events.publish(
+                {
+                    "type": "voice.loop.started",
+                    "timestamp": utc_now_iso(),
+                    "session_id": snapshot.session_id,
+                    "mode": snapshot.mode.value,
+                    "require_wake_word": snapshot.require_wake_word,
+                    "poll_interval_sec": snapshot.poll_interval_sec,
+                }
+            )
+        return snapshot
+
+    async def stop_voice_loop(self) -> VoiceLoopStateResponse:
+        stopped = False
+        task: asyncio.Task[None] | None = None
+        async with self._lock:
+            state = self._voice_loop_state
+            if state.running:
+                stopped = True
+                state.running = False
+                state.touch()
+                task = self._voice_loop_task
+                self._voice_loop_task = None
+            snapshot = self._voice_loop_snapshot_locked()
+
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+        if stopped:
+            await self.events.publish(
+                {
+                    "type": "voice.loop.stopped",
+                    "timestamp": utc_now_iso(),
+                    "session_id": snapshot.session_id,
+                }
+            )
+        return snapshot
+
+    async def get_voice_loop_state(self) -> VoiceLoopStateResponse:
+        async with self._lock:
+            return self._voice_loop_snapshot_locked()
+
     def list_tools(self) -> list[dict[str, Any]]:
         return self.registry.list_tools()
 
@@ -540,6 +693,190 @@ class Orchestrator:
                 )
             await asyncio.sleep(max(3, self.settings.reminder_poll_interval_sec))
 
+    async def _voice_loop_worker(self) -> None:
+        while True:
+            async with self._lock:
+                state = self._voice_loop_state
+                if not state.running:
+                    return
+                session_id = state.session_id
+                mode = state.mode
+                require_wake_word = state.require_wake_word
+                poll_interval_sec = max(1, state.poll_interval_sec)
+
+            try:
+                capture = await asyncio.to_thread(self.voice.capture_once)
+                transcript = str(capture.get("transcript", "")).strip()
+                backend = str(capture.get("backend", "none"))
+                warning = str(capture.get("warning", "")).strip()
+                audio_path = str(capture.get("path", "")).strip()
+
+                if audio_path:
+                    stt = await self.transcribe_audio(Path(audio_path))
+                    transcript = stt.get("text", "").strip()
+                    backend = stt.get("backend", backend)
+                    stt_warning = str(stt.get("warning", "")).strip()
+                    if stt_warning:
+                        warning = stt_warning if not warning else f"{warning}; {stt_warning}"
+
+                if not transcript:
+                    inbox_file = self.voice.next_inbox_file(self._voice_loop_seen_files)
+                    if inbox_file is not None:
+                        stt = await self.transcribe_audio(inbox_file)
+                        transcript = stt.get("text", "").strip()
+                        backend = stt.get("backend", backend)
+                        stt_warning = str(stt.get("warning", "")).strip()
+                        if stt_warning:
+                            warning = stt_warning if not warning else f"{warning}; {stt_warning}"
+
+                if warning:
+                    await self._record_voice_loop_error(warning)
+
+                if not transcript:
+                    await asyncio.sleep(poll_interval_sec)
+                    continue
+
+                command_text = transcript
+                if require_wake_word:
+                    detected, command_text = self.voice.parse_wake_command(transcript)
+                    if not detected:
+                        await self._record_voice_loop_skip(
+                            transcript=transcript,
+                            backend=backend,
+                            reason="wake word not detected",
+                        )
+                        await self.events.publish(
+                            {
+                                "type": "voice.loop.ignored",
+                                "timestamp": utc_now_iso(),
+                                "session_id": session_id,
+                                "transcript": transcript,
+                                "reason": "wake_word_not_detected",
+                            }
+                        )
+                        await asyncio.sleep(poll_interval_sec)
+                        continue
+                    if not command_text:
+                        await self._record_voice_loop_skip(
+                            transcript=transcript,
+                            backend=backend,
+                            reason="wake word detected without command",
+                        )
+                        await self.events.publish(
+                            {
+                                "type": "voice.loop.ignored",
+                                "timestamp": utc_now_iso(),
+                                "session_id": session_id,
+                                "transcript": transcript,
+                                "reason": "wake_word_without_command",
+                            }
+                        )
+                        await asyncio.sleep(poll_interval_sec)
+                        continue
+
+                response = await self.process_voice_text(
+                    transcript=command_text,
+                    session_id=session_id,
+                    mode=mode,
+                )
+                await self._record_voice_loop_processed(
+                    transcript=transcript,
+                    command=command_text,
+                    reply=response.reply,
+                    backend=backend,
+                )
+                await self.events.publish(
+                    {
+                        "type": "voice.loop.processed",
+                        "timestamp": utc_now_iso(),
+                        "session_id": session_id,
+                        "mode": mode.value,
+                        "transcript": transcript,
+                        "command": command_text,
+                        "reply": response.reply,
+                        "audio_path": response.audio_path,
+                        "interrupted": response.interrupted,
+                    }
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                await self._record_voice_loop_error(str(exc))
+                await self.events.publish(
+                    {
+                        "type": "voice.loop.error",
+                        "timestamp": utc_now_iso(),
+                        "session_id": session_id,
+                        "message": str(exc),
+                    }
+                )
+
+            await asyncio.sleep(poll_interval_sec)
+
+    def _list_current_inbox_files(self) -> set[str]:
+        files: set[str] = set()
+        try:
+            for path in self.voice.input_dir.iterdir():
+                if path.is_file():
+                    files.add(str(path.resolve()))
+        except FileNotFoundError:
+            return set()
+        return files
+
+    def _voice_loop_snapshot_locked(self) -> VoiceLoopStateResponse:
+        state = self._voice_loop_state
+        return VoiceLoopStateResponse(
+            running=state.running,
+            session_id=state.session_id,
+            mode=state.mode,
+            require_wake_word=state.require_wake_word,
+            poll_interval_sec=state.poll_interval_sec,
+            wake_words=list(state.wake_words),
+            processed_count=state.processed_count,
+            skipped_count=state.skipped_count,
+            last_transcript=state.last_transcript,
+            last_command=state.last_command,
+            last_reply=state.last_reply,
+            last_backend=state.last_backend,
+            last_error=state.last_error,
+            started_at=state.started_at,
+            updated_at=state.updated_at,
+        )
+
+    async def _record_voice_loop_processed(
+        self,
+        transcript: str,
+        command: str,
+        reply: str,
+        backend: str,
+    ) -> None:
+        async with self._lock:
+            state = self._voice_loop_state
+            state.processed_count += 1
+            state.last_transcript = transcript
+            state.last_command = command
+            state.last_reply = reply
+            state.last_backend = backend
+            state.last_error = ""
+            state.touch()
+
+    async def _record_voice_loop_skip(self, transcript: str, backend: str, reason: str) -> None:
+        async with self._lock:
+            state = self._voice_loop_state
+            state.skipped_count += 1
+            state.last_transcript = transcript
+            state.last_backend = backend
+            state.last_error = reason
+            state.touch()
+
+    async def _record_voice_loop_error(self, error: str) -> None:
+        if not error:
+            return
+        async with self._lock:
+            state = self._voice_loop_state
+            state.last_error = error
+            state.touch()
+
     def _add_timeline(
         self,
         run: ActionRun,
@@ -566,3 +903,11 @@ class Orchestrator:
             f"Run {run.id} finished with status '{run.status.value}'. "
             f"Successful steps: {success_count}, failed/blocked: {failure_count}."
         )
+
+    def _assistant_mode_from_text(self, mode: str) -> AssistantMode:
+        value = mode.strip().lower()
+        if value == AssistantMode.CHAT.value:
+            return AssistantMode.CHAT
+        if value == AssistantMode.CODE.value:
+            return AssistantMode.CODE
+        return AssistantMode.ACTION

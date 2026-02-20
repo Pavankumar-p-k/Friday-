@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
 from friday.config import Settings
 from friday.orchestrator import Orchestrator
@@ -28,6 +29,10 @@ from friday.schemas import (
     Plan,
     PlanRequest,
     VoiceCommandResponse,
+    VoiceDispatchRequest,
+    VoiceDispatchResponse,
+    VoiceLoopStartRequest,
+    VoiceLoopStateResponse,
     VoiceSpeakRequest,
     VoiceSpeakResponse,
     VoiceTranscriptionResponse,
@@ -47,6 +52,13 @@ def create_app() -> FastAPI:
             await orchestrator.stop_background_workers()
 
     app = FastAPI(title=settings.app_name, version="0.3.0", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.orchestrator = orchestrator
 
     @app.get("/health")
@@ -224,12 +236,41 @@ def create_app() -> FastAPI:
             mode=mode,
         )
 
+    @app.post("/v1/voice/dispatch", response_model=VoiceDispatchResponse)
+    async def voice_dispatch(payload: VoiceDispatchRequest) -> VoiceDispatchResponse:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.dispatch_transcribed_speech(
+            transcript=payload.transcript,
+            session_id=payload.session_id,
+            context=payload.context,
+        )
+
     @app.post("/v1/voice/interrupt")
     async def voice_interrupt(payload: dict[str, str]) -> dict[str, object]:
         orchestrator: Orchestrator = app.state.orchestrator
         session_id = payload.get("session_id", "default")
         state = await orchestrator.interrupt_voice_session(session_id=session_id)
         return {"ok": True, "session_id": state.session_id, "interrupted": state.interrupted}
+
+    @app.get("/v1/voice/loop/state", response_model=VoiceLoopStateResponse)
+    async def voice_loop_state() -> VoiceLoopStateResponse:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.get_voice_loop_state()
+
+    @app.post("/v1/voice/loop/start", response_model=VoiceLoopStateResponse)
+    async def voice_loop_start(payload: VoiceLoopStartRequest) -> VoiceLoopStateResponse:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.start_voice_loop(
+            session_id=payload.session_id,
+            mode=payload.mode,
+            require_wake_word=payload.require_wake_word,
+            poll_interval_sec=payload.poll_interval_sec,
+        )
+
+    @app.post("/v1/voice/loop/stop", response_model=VoiceLoopStateResponse)
+    async def voice_loop_stop() -> VoiceLoopStateResponse:
+        orchestrator: Orchestrator = app.state.orchestrator
+        return await orchestrator.stop_voice_loop()
 
     @app.post("/v1/voice/wakeword/check")
     async def wakeword_check(payload: VoiceSpeakRequest) -> dict[str, object]:
@@ -358,8 +399,31 @@ def _parse_mode(value: Any) -> AssistantMode:
 
 
 async def _save_upload(orchestrator: Orchestrator, file: UploadFile) -> Path:
-    content = await file.read()
-    return orchestrator.voice.save_upload(file.filename or "audio.bin", content)
+    max_bytes = max(1, orchestrator.settings.voice_max_upload_bytes)
+    target = orchestrator.voice.allocate_upload_path(file.filename or "audio.bin")
+    written = 0
+    try:
+        with target.open("wb") as handle:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Uploaded file exceeds limit ({max_bytes} bytes).",
+                    )
+                handle.write(chunk)
+    except HTTPException:
+        target.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Failed to save uploaded file: {exc}") from exc
+    finally:
+        await file.close()
+    return target
 
 
 app = create_app()
