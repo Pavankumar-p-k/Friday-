@@ -26,6 +26,7 @@ dev = [
 
 [project.scripts]
 friday-api = "friday.main:run"
+friday-engine = "friday.assistant_engine.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
