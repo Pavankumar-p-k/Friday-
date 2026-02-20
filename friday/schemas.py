@@ -251,3 +251,80 @@ class JarvisPluginToggleRequest(BaseModel):
 class JarvisTerminateProcessRequest(BaseModel):
     pid: int
     bypass_confirmation: bool = False
+
+
+class DashboardLoginRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class DashboardTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
+class DashboardStatsResponse(BaseModel):
+    chat_history_count: int = 0
+    voice_history_count: int = 0
+    action_history_count: int = 0
+    action_success_count: int = 0
+    action_failure_count: int = 0
+    log_count: int = 0
+    started_at: str = ""
+    uptime_sec: int = 0
+
+
+class DashboardLogEntry(BaseModel):
+    id: int
+    level: str
+    message: str
+    source: str
+    meta: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class DashboardVoiceHistoryEntry(BaseModel):
+    id: int
+    session_id: str
+    transcript: str
+    reply: str
+    mode: str
+    llm_backend: str
+    stt_backend: str
+    tts_backend: str
+    meta: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class DashboardSettingsUpdateRequest(BaseModel):
+    updates: dict[str, str] = Field(default_factory=dict)
+
+
+class DashboardSettingsResponse(BaseModel):
+    settings: dict[str, str] = Field(default_factory=dict)
+
+
+class DashboardActionExecuteRequest(BaseModel):
+    session_id: str = Field(default="dashboard", min_length=1)
+    tool: str = Field(min_length=1)
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class DashboardActionExecuteResponse(BaseModel):
+    success: bool
+    message: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    tool: str
+
+
+class DashboardActionHistoryEntry(BaseModel):
+    id: int
+    session_id: str
+    actor: str
+    tool: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    success: bool
+    message: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    created_at: str

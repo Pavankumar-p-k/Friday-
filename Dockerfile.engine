@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN useradd --create-home --shell /usr/sbin/nologin app
+
+COPY pyproject.toml README.md requirements.txt ./
+COPY friday ./friday
+
+RUN python -m pip install --upgrade pip && \
+    pip install .
+
+RUN mkdir -p /data/voice/out && \
+    chown -R app:app /app /data
+
+USER app
+
+ENV FRIDAY_ENGINE_TTS_OUTPUT_DIR=/data/voice/out \
+    FRIDAY_ENGINE_PRINT_EVENTS=true
+
+CMD ["python", "-m", "friday.assistant_engine.service"]

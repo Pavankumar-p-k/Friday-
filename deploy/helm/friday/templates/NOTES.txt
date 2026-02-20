@@ -1,0 +1,16 @@
+1. Get dashboard URL:
+{{- if .Values.dashboard.ingress.enabled }}
+  http{{ if .Values.dashboard.ingress.tls }}s{{ end }}://{{ (index .Values.dashboard.ingress.hosts 0).host }}
+{{- else if eq .Values.dashboard.service.type "LoadBalancer" }}
+  kubectl get svc -n {{ .Release.Namespace }} {{ include "friday.fullname" . }}-dashboard -o jsonpath="{.status.loadBalancer.ingress[0].ip}"
+{{- else }}
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "friday.fullname" . }}-dashboard 8080:{{ .Values.dashboard.service.port }}
+{{- end }}
+
+2. API docs:
+   {{- if .Values.dashboard.ingress.enabled }}
+   http{{ if .Values.dashboard.ingress.tls }}s{{ end }}://{{ (index .Values.dashboard.ingress.hosts 0).host }}/docs
+   {{- else }}
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "friday.fullname" . }}-api 8000:{{ .Values.api.service.port }}
+   then open http://127.0.0.1:8000/docs
+   {{- end }}

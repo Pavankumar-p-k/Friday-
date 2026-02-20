@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: friday-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: friday-api
+  template:
+    metadata:
+      labels:
+        app: friday-api
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/OWNER/REPO/friday-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: friday-config
+            - secretRef:
+                name: friday-secrets
+          volumeMounts:
+            - name: friday-data
+              mountPath: /data
+            - name: workspace
+              mountPath: /workspace
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+      volumes:
+        - name: friday-data
+          persistentVolumeClaim:
+            claimName: friday-data
+        - name: workspace
+          emptyDir: {}

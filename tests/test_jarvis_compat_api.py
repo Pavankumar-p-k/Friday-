@@ -57,3 +57,16 @@ def test_jarvis_briefing_endpoint(tmp_path: Path, monkeypatch) -> None:
     assert "headline" in payload
     assert "suggestedFocus" in payload
 
+
+def test_jarvis_run_command_reports_failure_when_tool_fails(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("FRIDAY_DB_PATH", str(tmp_path / "jarvis4.db"))
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/jarvis/run-command",
+        json={"command": "run command python --versionx", "bypass_confirmation": True},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["result"]["ok"] is False

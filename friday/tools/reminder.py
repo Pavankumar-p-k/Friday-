@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from friday.schemas import ToolExecutionResult
@@ -29,7 +29,7 @@ class ReminderTool(Tool):
             note = str(args.get("note", "")).strip() or "Reminder"
             due_at = str(args.get("due_at", "")).strip()
             if not due_at:
-                due_at = (datetime.utcnow() + timedelta(minutes=30)).isoformat() + "Z"
+                due_at = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
             reminder_id = context.storage.add_reminder(note=note, due_at=due_at)
             return ToolExecutionResult(
                 success=True,
@@ -62,4 +62,3 @@ class ReminderTool(Tool):
             )
 
         return ToolExecutionResult(success=False, message=f"Unsupported reminder action '{action}'.")
-

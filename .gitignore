@@ -36,3 +36,5 @@ data/voice/*
 logs/
 models/**/*.gguf
 apps/jarvis-bridge/
+apps/dashboard/node_modules/
+apps/dashboard/dist/

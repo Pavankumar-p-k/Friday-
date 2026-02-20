@@ -4,16 +4,40 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
+from starlette import status
 
 from friday.config import Settings
+from friday.dashboard_auth import DashboardAuthError, DashboardAuthManager, DashboardUser
+from friday.dashboard_service import DashboardService
 from friday.orchestrator import Orchestrator
 from friday.schemas import (
     ActionRun,
     AssistantMode,
     ChatRequest,
     ChatResponse,
+    DashboardActionExecuteRequest,
+    DashboardActionExecuteResponse,
+    DashboardActionHistoryEntry,
+    DashboardLogEntry,
+    DashboardLoginRequest,
+    DashboardSettingsResponse,
+    DashboardSettingsUpdateRequest,
+    DashboardStatsResponse,
+    DashboardTokenResponse,
+    DashboardVoiceHistoryEntry,
     ExecuteRequest,
     JarvisAutomationToggleRequest,
     JarvisIdRequest,
@@ -42,13 +66,17 @@ from friday.schemas import (
 def create_app() -> FastAPI:
     settings = Settings.from_env()
     orchestrator = Orchestrator(settings)
+    auth = DashboardAuthManager()
+    dashboard = DashboardService(storage=orchestrator.storage, settings=settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await orchestrator.start_background_workers()
+        await dashboard.start(orchestrator.events)
         try:
             yield
         finally:
+            await dashboard.stop(orchestrator.events)
             await orchestrator.stop_background_workers()
 
     app = FastAPI(title=settings.app_name, version="0.3.0", lifespan=lifespan)
@@ -60,10 +88,152 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.state.orchestrator = orchestrator
+    app.state.dashboard = dashboard
+    app.state.auth = auth
+
+    def require_dashboard_user(
+        authorization: str | None = Header(default=None),
+    ) -> DashboardUser:
+        auth: DashboardAuthManager = app.state.auth
+        if not auth.enabled:
+            return DashboardUser(username=auth.username)
+        token = _extract_bearer_token(authorization)
+        try:
+            return auth.verify_token(token)
+        except DashboardAuthError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(exc),
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
 
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/v1/dashboard/auth/login", response_model=DashboardTokenResponse)
+    async def dashboard_login(payload: DashboardLoginRequest) -> DashboardTokenResponse:
+        auth: DashboardAuthManager = app.state.auth
+        dashboard: DashboardService = app.state.dashboard
+        try:
+            token = auth.issue_token(payload.username, payload.password)
+        except DashboardAuthError as exc:
+            await dashboard.log(
+                level="WARNING",
+                message="dashboard login failed",
+                source="auth",
+                meta={"username": payload.username},
+            )
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+        await dashboard.log(
+            level="INFO",
+            message="dashboard login succeeded",
+            source="auth",
+            meta={"username": payload.username},
+        )
+        return DashboardTokenResponse(
+            access_token=str(token["access_token"]),
+            token_type=str(token["token_type"]),
+            expires_in=int(token["expires_in"]),
+        )
+
+    @app.get("/v1/dashboard/stats", response_model=DashboardStatsResponse)
+    async def dashboard_stats(
+        user: DashboardUser = Depends(require_dashboard_user),
+    ) -> DashboardStatsResponse:
+        _ = user
+        dashboard: DashboardService = app.state.dashboard
+        return DashboardStatsResponse(**dashboard.get_stats())
+
+    @app.get("/v1/dashboard/logs", response_model=list[DashboardLogEntry])
+    async def dashboard_logs(
+        limit: int = Query(default=100, ge=1, le=500),
+        user: DashboardUser = Depends(require_dashboard_user),
+    ) -> list[DashboardLogEntry]:
+        _ = user
+        dashboard: DashboardService = app.state.dashboard
+        return [DashboardLogEntry(**row) for row in dashboard.list_logs(limit=limit)]
+
+    @app.get("/v1/dashboard/voice-history", response_model=list[DashboardVoiceHistoryEntry])
+    async def dashboard_voice_history(
+        limit: int = Query(default=100, ge=1, le=500),
+        user: DashboardUser = Depends(require_dashboard_user),
+    ) -> list[DashboardVoiceHistoryEntry]:
+        _ = user
+        dashboard: DashboardService = app.state.dashboard
+        return [DashboardVoiceHistoryEntry(**row) for row in dashboard.list_voice_history(limit=limit)]
+
+    @app.get("/v1/dashboard/settings", response_model=DashboardSettingsResponse)
+    async def dashboard_settings_get(
+        user: DashboardUser = Depends(require_dashboard_user),
+    ) -> DashboardSettingsResponse:
+        _ = user
+        dashboard: DashboardService = app.state.dashboard
+        return DashboardSettingsResponse(settings=dashboard.get_settings())
+
+    @app.put("/v1/dashboard/settings", response_model=DashboardSettingsResponse)
+    async def dashboard_settings_update(
+        payload: DashboardSettingsUpdateRequest,
+        user: DashboardUser = Depends(require_dashboard_user),
+    ) -> DashboardSettingsResponse:
+        dashboard: DashboardService = app.state.dashboard
+        settings_map = dashboard.update_settings(payload.updates)
+        await dashboard.log(
+            level="INFO",
+            message="dashboard settings updated",
+            source="dashboard",
+            meta={"actor": user.username, "keys": list(payload.updates.keys())},
+        )
+        return DashboardSettingsResponse(settings=settings_map)
+
+    @app.post("/v1/dashboard/actions/execute", response_model=DashboardActionExecuteResponse)
+    async def dashboard_execute_action(
+        payload: DashboardActionExecuteRequest,
+        user: DashboardUser = Depends(require_dashboard_user),
+    ) -> DashboardActionExecuteResponse:
+        orchestrator: Orchestrator = app.state.orchestrator
+        dashboard: DashboardService = app.state.dashboard
+        result = await orchestrator.execute_tool_action(
+            session_id=payload.session_id,
+            actor=user.username,
+            tool=payload.tool,
+            args=payload.args,
+        )
+        await dashboard.log(
+            level="INFO" if result.success else "ERROR",
+            message="dashboard action execute",
+            source="dashboard.actions",
+            meta={
+                "actor": user.username,
+                "session_id": payload.session_id,
+                "tool": payload.tool,
+                "success": result.success,
+            },
+        )
+        await dashboard.realtime.publish(
+            {
+                "type": "dashboard.action.executed",
+                "tool": payload.tool,
+                "success": result.success,
+                "session_id": payload.session_id,
+            }
+        )
+        return DashboardActionExecuteResponse(
+            success=result.success,
+            message=result.message,
+            data=result.data,
+            tool=payload.tool,
+        )
+
+    @app.get("/v1/dashboard/actions/history", response_model=list[DashboardActionHistoryEntry])
+    async def dashboard_action_history(
+        limit: int = Query(default=100, ge=1, le=500),
+        user: DashboardUser = Depends(require_dashboard_user),
+    ) -> list[DashboardActionHistoryEntry]:
+        _ = user
+        dashboard: DashboardService = app.state.dashboard
+        return [DashboardActionHistoryEntry(**row) for row in dashboard.list_action_history(limit=limit)]
 
     @app.post("/v1/chat", response_model=ChatResponse)
     async def chat(payload: ChatRequest) -> ChatResponse:
@@ -229,21 +399,39 @@ def create_app() -> FastAPI:
         session_id: str = Form(default="default"),
     ) -> VoiceCommandResponse:
         orchestrator: Orchestrator = app.state.orchestrator
+        dashboard: DashboardService = app.state.dashboard
         path = await _save_upload(orchestrator=orchestrator, file=file)
-        return await orchestrator.process_voice_command(
+        result = await orchestrator.process_voice_command(
             audio_path=path,
             session_id=session_id,
             mode=mode,
         )
+        await dashboard.realtime.publish(
+            {
+                "type": "dashboard.voice_history.updated",
+                "session_id": session_id,
+                "mode": mode.value,
+            }
+        )
+        return result
 
     @app.post("/v1/voice/dispatch", response_model=VoiceDispatchResponse)
     async def voice_dispatch(payload: VoiceDispatchRequest) -> VoiceDispatchResponse:
         orchestrator: Orchestrator = app.state.orchestrator
-        return await orchestrator.dispatch_transcribed_speech(
+        dashboard: DashboardService = app.state.dashboard
+        result = await orchestrator.dispatch_transcribed_speech(
             transcript=payload.transcript,
             session_id=payload.session_id,
             context=payload.context,
         )
+        await dashboard.realtime.publish(
+            {
+                "type": "dashboard.voice_history.updated",
+                "session_id": payload.session_id,
+                "mode": result.mode.value,
+            }
+        )
+        return result
 
     @app.post("/v1/voice/interrupt")
     async def voice_interrupt(payload: dict[str, str]) -> dict[str, object]:
@@ -386,6 +574,35 @@ def create_app() -> FastAPI:
         finally:
             await orchestrator.events.unsubscribe(queue)
 
+    @app.websocket("/v1/dashboard/ws")
+    async def dashboard_ws(websocket: WebSocket, token: str = Query(default="")) -> None:
+        dashboard: DashboardService = app.state.dashboard
+        auth: DashboardAuthManager = app.state.auth
+
+        if auth.enabled:
+            try:
+                auth.verify_token(token)
+            except DashboardAuthError:
+                await websocket.close(code=4401, reason="Unauthorized")
+                return
+
+        await websocket.accept()
+        queue = await dashboard.realtime.subscribe()
+        try:
+            await websocket.send_json(
+                {
+                    "type": "dashboard.snapshot",
+                    "stats": dashboard.get_stats(),
+                }
+            )
+            while True:
+                event = await queue.get()
+                await websocket.send_json(event)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            await dashboard.realtime.unsubscribe(queue)
+
     return app
 
 
@@ -396,6 +613,24 @@ def _parse_mode(value: Any) -> AssistantMode:
     if text == AssistantMode.CHAT.value:
         return AssistantMode.CHAT
     return AssistantMode.ACTION
+
+
+def _extract_bearer_token(authorization: str | None) -> str:
+    if not authorization:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization header.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    text = authorization.strip()
+    parts = text.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Expected Bearer token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return parts[1].strip()
 
 
 async def _save_upload(orchestrator: Orchestrator, file: UploadFile) -> Path:

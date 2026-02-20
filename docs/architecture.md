@@ -13,6 +13,7 @@
 - Runs background reminder notification worker
 - Coordinates voice command pipeline and model management
 - Tracks voice session state for partial/final transcripts and interruptions
+- Runs always-on voice loop worker with wake-word gating
 
 3. Planning Layer (`friday/planner.py`)
 - Rule-based intent extraction for deterministic offline behavior
@@ -37,6 +38,7 @@
 8. Voice Layer (`friday/voice.py`)
 - Upload handling, STT adapter, TTS adapter, wake-word checks
 - Command-based integration with local binaries (`whisper.cpp`, `Piper`)
+- Optional capture command and inbox polling for continuous offline listening
 - Live voice message protocol handled through websocket endpoint in API layer
 
 9. Retrieval Layer (`friday/code_context.py`)
@@ -68,3 +70,4 @@
 7. Run status retrievable from `/v1/actions/{run_id}`
 8. Reminder worker emits `reminder.due` when due reminders are detected
 9. Live voice websocket supports `partial`, `final`, and `barge_in` messages
+10. Voice loop worker polls capture/inbox input, enforces wake-word rules, and executes commands

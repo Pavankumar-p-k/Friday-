@@ -12,7 +12,7 @@ from typing import Any
 
 from friday.config import Settings
 from friday.llm import LocalLLMClient
-from friday.schemas import AssistantMode, ChatRequest, ExecuteRequest
+from friday.schemas import AssistantMode, ChatRequest, ExecuteRequest, RunStatus
 from friday.storage import Storage
 
 
@@ -58,11 +58,13 @@ class JarvisCompatService:
         self.plugins = self._load_plugins()
 
     async def get_state(self) -> dict[str, Any]:
+        telemetry = await asyncio.to_thread(self._telemetry_snapshot)
+        reminders = await asyncio.to_thread(self._map_reminders)
         async with self._lock:
             state = {
                 "mode": self.mode,
-                "telemetry": self._telemetry_snapshot(),
-                "reminders": self._map_reminders(),
+                "telemetry": telemetry,
+                "reminders": reminders,
                 "alarms": _clone(self.alarms),
                 "routines": _clone(self.routines),
                 "memory": _clone(self.memory),
@@ -134,13 +136,17 @@ class JarvisCompatService:
                     f"Executed with status {run.status.value}. "
                     f"Timeline events: {len(run.timeline)}."
                 )
+                ok = run.status != RunStatus.FAILED
                 needs_confirmation = False
 
             if needs_confirmation and not bypass_confirmation:
                 ok = False
                 message = "Confirmation needed for this action. Run again with confirmation."
             else:
-                ok = "blocked" not in message.lower()
+                if chat_response.run_id:
+                    run = await self.orchestrator.get_run(chat_response.run_id)
+                    if run is not None:
+                        ok = run.status != RunStatus.FAILED
 
         async with self._lock:
             self._record_command(
@@ -509,4 +515,3 @@ class JarvisCompatService:
             except Exception:
                 continue
         return items
-

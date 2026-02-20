@@ -4,6 +4,45 @@ from friday.config import Settings
 from friday.schemas import PlanStep, PolicyDecision, RiskLevel
 
 
+_BLOCKED_CONTROL_OPERATORS: tuple[str, ...] = (
+    "&&",
+    "||",
+    "|",
+    ";",
+    "<",
+    ">",
+    "$(",
+    "`",
+    "&",
+)
+
+
+def _contains_shell_control_operator(command: str) -> bool:
+    lowered = command.lower()
+    for operator in _BLOCKED_CONTROL_OPERATORS:
+        if operator in lowered:
+            return True
+    return False
+
+
+def _contains_line_break(command: str) -> bool:
+    return "\n" in command or "\r" in command
+
+
+def _is_allowlisted_shell_prefix(command: str, allowed_prefixes: tuple[str, ...]) -> bool:
+    lowered = command.strip().lower()
+    for prefix in allowed_prefixes:
+        normalized = prefix.strip().lower()
+        if not normalized:
+            continue
+        if lowered == normalized:
+            return True
+        if lowered.startswith(normalized) and len(lowered) > len(normalized):
+            if lowered[len(normalized)].isspace():
+                return True
+    return False
+
+
 class PolicyEngine:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -91,6 +130,20 @@ class PolicyEngine:
                     needs_approval=True,
                     reason="Shell command is missing.",
                 )
+            if _contains_line_break(command):
+                return PolicyDecision(
+                    allowed=False,
+                    risk=RiskLevel.HIGH,
+                    needs_approval=True,
+                    reason="Shell command contains forbidden line break.",
+                )
+            if _contains_shell_control_operator(command):
+                return PolicyDecision(
+                    allowed=False,
+                    risk=RiskLevel.HIGH,
+                    needs_approval=True,
+                    reason="Shell command contains forbidden control operator.",
+                )
             lowered = f" {command.lower()} "
             for term in self.settings.blocked_shell_terms:
                 if term.lower() in lowered:
@@ -100,14 +153,13 @@ class PolicyEngine:
                         needs_approval=True,
                         reason="Shell command contains blocked term.",
                     )
-            for prefix in self.settings.allowed_shell_prefixes:
-                if command.lower().startswith(prefix.lower()):
-                    return PolicyDecision(
-                        allowed=True,
-                        risk=RiskLevel.MEDIUM,
-                        needs_approval=True,
-                        reason="Allowlisted shell command requires explicit approval.",
-                    )
+            if _is_allowlisted_shell_prefix(command, self.settings.allowed_shell_prefixes):
+                return PolicyDecision(
+                    allowed=True,
+                    risk=RiskLevel.MEDIUM,
+                    needs_approval=True,
+                    reason="Allowlisted shell command requires explicit approval.",
+                )
             return PolicyDecision(
                 allowed=False,
                 risk=RiskLevel.HIGH,

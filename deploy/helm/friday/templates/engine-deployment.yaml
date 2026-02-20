@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "friday.fullname" . }}-engine
+  labels:
+    {{- include "friday.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.engine.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: engine
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "friday.labels" . | nindent 8 }}
+        app.kubernetes.io/component: engine
+    spec:
+      containers:
+        - name: engine
+          image: ghcr.io/{{ .Values.global.ghcrOwner }}/{{ .Values.engine.image.repository }}:{{ .Values.global.imageTag }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "friday.fullname" . }}-config
+            - secretRef:
+                name: {{ include "friday.secretName" . }}
+          volumeMounts:
+            - name: friday-data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.engine.resources | nindent 12 }}
+      volumes:
+        - name: friday-data
+          persistentVolumeClaim:
+            claimName: {{ include "friday.dataClaimName" . }}

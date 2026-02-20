@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import subprocess
 from typing import Any
 
@@ -30,12 +31,18 @@ class OpenAppTool(Tool):
 
         app_command = context.settings.allowed_apps[app_name]
         try:
-            subprocess.Popen(app_command, shell=True)
+            run_args = shlex.split(app_command, posix=False)
+        except ValueError as exc:
+            return ToolExecutionResult(success=False, message=f"Invalid app command: {exc}")
+        if not run_args:
+            return ToolExecutionResult(success=False, message="Configured app command is empty.")
+
+        try:
+            subprocess.Popen(run_args, shell=False)
             return ToolExecutionResult(
                 success=True,
                 message=f"Opened {app_name}.",
-                data={"app_name": app_name, "command": app_command},
+                data={"app_name": app_name, "command": app_command, "executed_as": run_args},
             )
         except Exception as exc:
             return ToolExecutionResult(success=False, message=f"Failed to open app: {exc}")
-

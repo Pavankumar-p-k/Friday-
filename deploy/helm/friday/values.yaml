@@ -1,0 +1,91 @@
+global:
+  ghcrOwner: your-ghcr-owner
+  imageTag: latest
+  imagePullPolicy: IfNotPresent
+
+auth:
+  existingSecret: ""
+  username: admin
+  password: change-me
+  secret: change-this-secret
+  cloudLlmApiKey: ""
+
+config:
+  appName: FRIDAY Offline
+  dashboardAuthEnabled: "true"
+  dbPath: /data/sqlite/friday.db
+  voiceInputDir: /data/voice/inbox
+  voiceOutputDir: /data/voice/out
+  workspaceRoot: /workspace
+  autoExecuteLowRisk: "true"
+  reminderPollIntervalSec: "15"
+  ollamaBaseUrl: http://ollama:11434
+  ollamaModel: qwen2.5:7b-instruct
+  engineRequireWakeWord: "true"
+  engineQueueMaxSize: "128"
+  engineLogLevel: INFO
+  engineSttEmitPartials: "true"
+  engineSttMinPartialChars: "8"
+  engineCloudLlmEnabled: "false"
+  engineCloudLlmModel: gpt-4o-mini
+  engineCloudTimeoutSec: "30"
+  engineTtsOutputDir: /data/voice/out
+  enginePrintEvents: "true"
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  size: 10Gi
+  storageClass: ""
+
+api:
+  replicaCount: 1
+  image:
+    repository: friday-api
+  service:
+    port: 8000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+engine:
+  replicaCount: 1
+  image:
+    repository: friday-engine
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi
+
+dashboard:
+  replicaCount: 2
+  image:
+    repository: friday-dashboard
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8080
+  ingress:
+    enabled: true
+    className: nginx
+    annotations: {}
+    hosts:
+      - host: friday.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi

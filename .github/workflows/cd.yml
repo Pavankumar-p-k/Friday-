@@ -1,0 +1,181 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: "Deployment target"
+        required: true
+        type: choice
+        options:
+          - none
+          - staging
+          - production
+          - both
+        default: none
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push-images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: api
+            dockerfile: Dockerfile.api
+            image: ghcr.io/${{ github.repository_owner }}/friday-api
+          - component: engine
+            dockerfile: Dockerfile.engine
+            image: ghcr.io/${{ github.repository_owner }}/friday-engine
+          - component: dashboard
+            dockerfile: Dockerfile.dashboard
+            image: ghcr.io/${{ github.repository_owner }}/friday-dashboard
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=sha
+            type=raw,value=sha-${{ github.sha }}
+            type=ref,event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push ${{ matrix.component }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: build-and-push-images
+    if: ${{ (github.event_name == 'push' || github.event.inputs.deploy_target == 'staging' || github.event.inputs.deploy_target == 'both') && secrets.KUBE_CONFIG_STAGING != '' && secrets.FRIDAY_DASHBOARD_AUTH_PASSWORD_STAGING != '' && secrets.FRIDAY_DASHBOARD_AUTH_SECRET_STAGING != '' }}
+    environment: staging
+    env:
+      NAMESPACE: ${{ vars.FRIDAY_K8S_NAMESPACE_STAGING || 'friday-staging' }}
+      IMAGE_TAG: sha-${{ github.sha }}
+      GHCR_OWNER: ${{ github.repository_owner }}
+      FRIDAY_DASHBOARD_AUTH_USERNAME: ${{ secrets.FRIDAY_DASHBOARD_AUTH_USERNAME_STAGING || 'admin' }}
+      FRIDAY_DASHBOARD_AUTH_PASSWORD: ${{ secrets.FRIDAY_DASHBOARD_AUTH_PASSWORD_STAGING }}
+      FRIDAY_DASHBOARD_AUTH_SECRET: ${{ secrets.FRIDAY_DASHBOARD_AUTH_SECRET_STAGING }}
+      FRIDAY_ENGINE_CLOUD_LLM_API_KEY: ${{ secrets.FRIDAY_ENGINE_CLOUD_LLM_API_KEY_STAGING }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      - name: Configure kubeconfig
+        shell: bash
+        run: |
+          mkdir -p "${HOME}/.kube"
+          printf "%s" "${{ secrets.KUBE_CONFIG_STAGING }}" > "${HOME}/.kube/config"
+
+      - name: Deploy staging release with Helm
+        shell: bash
+        run: |
+          helm upgrade --install friday deploy/helm/friday \
+            --namespace "${NAMESPACE}" \
+            --create-namespace \
+            --values deploy/helm/values-staging.yaml \
+            --set "global.ghcrOwner=${GHCR_OWNER}" \
+            --set "global.imageTag=${IMAGE_TAG}" \
+            --set "auth.username=${FRIDAY_DASHBOARD_AUTH_USERNAME}" \
+            --set "auth.password=${FRIDAY_DASHBOARD_AUTH_PASSWORD}" \
+            --set "auth.secret=${FRIDAY_DASHBOARD_AUTH_SECRET}" \
+            --set "auth.cloudLlmApiKey=${FRIDAY_ENGINE_CLOUD_LLM_API_KEY:-}" \
+            --wait \
+            --timeout 5m
+
+      - name: Wait for rollout
+        run: |
+          kubectl -n "${NAMESPACE}" rollout status deployment/friday-api --timeout=180s
+          kubectl -n "${NAMESPACE}" rollout status deployment/friday-engine --timeout=180s
+          kubectl -n "${NAMESPACE}" rollout status deployment/friday-dashboard --timeout=180s
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: build-and-push-images
+    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.deploy_target == 'production' || github.event.inputs.deploy_target == 'both') && secrets.KUBE_CONFIG_PRODUCTION != '' && secrets.FRIDAY_DASHBOARD_AUTH_PASSWORD_PRODUCTION != '' && secrets.FRIDAY_DASHBOARD_AUTH_SECRET_PRODUCTION != '' }}
+    environment: production
+    env:
+      NAMESPACE: ${{ vars.FRIDAY_K8S_NAMESPACE_PRODUCTION || 'friday-production' }}
+      IMAGE_TAG: sha-${{ github.sha }}
+      GHCR_OWNER: ${{ github.repository_owner }}
+      FRIDAY_DASHBOARD_AUTH_USERNAME: ${{ secrets.FRIDAY_DASHBOARD_AUTH_USERNAME_PRODUCTION || 'admin' }}
+      FRIDAY_DASHBOARD_AUTH_PASSWORD: ${{ secrets.FRIDAY_DASHBOARD_AUTH_PASSWORD_PRODUCTION }}
+      FRIDAY_DASHBOARD_AUTH_SECRET: ${{ secrets.FRIDAY_DASHBOARD_AUTH_SECRET_PRODUCTION }}
+      FRIDAY_ENGINE_CLOUD_LLM_API_KEY: ${{ secrets.FRIDAY_ENGINE_CLOUD_LLM_API_KEY_PRODUCTION }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      - name: Configure kubeconfig
+        shell: bash
+        run: |
+          mkdir -p "${HOME}/.kube"
+          printf "%s" "${{ secrets.KUBE_CONFIG_PRODUCTION }}" > "${HOME}/.kube/config"
+
+      - name: Deploy production release with Helm
+        shell: bash
+        run: |
+          helm upgrade --install friday deploy/helm/friday \
+            --namespace "${NAMESPACE}" \
+            --create-namespace \
+            --values deploy/helm/values-production.yaml \
+            --set "global.ghcrOwner=${GHCR_OWNER}" \
+            --set "global.imageTag=${IMAGE_TAG}" \
+            --set "auth.username=${FRIDAY_DASHBOARD_AUTH_USERNAME}" \
+            --set "auth.password=${FRIDAY_DASHBOARD_AUTH_PASSWORD}" \
+            --set "auth.secret=${FRIDAY_DASHBOARD_AUTH_SECRET}" \
+            --set "auth.cloudLlmApiKey=${FRIDAY_ENGINE_CLOUD_LLM_API_KEY:-}" \
+            --wait \
+            --timeout 5m
+
+      - name: Wait for rollout
+        run: |
+          kubectl -n "${NAMESPACE}" rollout status deployment/friday-api --timeout=300s
+          kubectl -n "${NAMESPACE}" rollout status deployment/friday-engine --timeout=300s
+          kubectl -n "${NAMESPACE}" rollout status deployment/friday-dashboard --timeout=300s

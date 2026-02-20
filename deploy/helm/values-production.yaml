@@ -1,0 +1,22 @@
+global:
+  imageTag: latest
+
+config:
+  appName: FRIDAY Production
+  engineCloudLlmEnabled: "false"
+
+api:
+  replicaCount: 2
+
+engine:
+  replicaCount: 1
+
+dashboard:
+  replicaCount: 2
+  ingress:
+    enabled: true
+    hosts:
+      - host: friday.example.com
+        paths:
+          - path: /
+            pathType: Prefix

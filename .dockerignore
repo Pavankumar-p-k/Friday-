@@ -1,0 +1,17 @@
+.git
+.github
+.venv
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+data/sqlite/*.db
+data/voice/inbox/*
+data/voice/out/*
+apps/dashboard/node_modules
+apps/dashboard/dist
+apps/jarvis-bridge/node_modules
+tests
+docs

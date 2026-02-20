@@ -98,9 +98,16 @@ class Settings:
     reminder_poll_interval_sec: int = 15
     voice_input_dir: Path = Path("data/voice/inbox")
     voice_output_dir: Path = Path("data/voice/out")
+    voice_max_upload_bytes: int = 10 * 1024 * 1024
     voice_stt_command: str = ""
     voice_tts_command: str = ""
     voice_wake_words: tuple[str, ...] = ("friday", "jarvis")
+    voice_loop_auto_start: bool = False
+    voice_loop_capture_command: str = ""
+    voice_loop_poll_interval_sec: int = 2
+    voice_loop_require_wake_word: bool = True
+    voice_loop_session_id: str = "voice-loop"
+    voice_loop_mode: str = "action"
     jarvis_plugins_dir: Path = Path("plugins")
     allowed_apps: dict[str, str] = field(default_factory=dict)
 
@@ -148,11 +155,45 @@ class Settings:
                 os.getenv("FRIDAY_VOICE_OUTPUT_DIR"),
                 base.voice_output_dir,
             ),
+            voice_max_upload_bytes=max(
+                1,
+                _parse_int(
+                    os.getenv("FRIDAY_VOICE_MAX_UPLOAD_BYTES"),
+                    base.voice_max_upload_bytes,
+                ),
+            ),
             voice_stt_command=os.getenv("FRIDAY_VOICE_STT_COMMAND", base.voice_stt_command),
             voice_tts_command=os.getenv("FRIDAY_VOICE_TTS_COMMAND", base.voice_tts_command),
             voice_wake_words=_parse_csv(
                 os.getenv("FRIDAY_VOICE_WAKE_WORDS"),
                 base.voice_wake_words,
+            ),
+            voice_loop_auto_start=_parse_bool(
+                os.getenv("FRIDAY_VOICE_LOOP_AUTO_START"),
+                base.voice_loop_auto_start,
+            ),
+            voice_loop_capture_command=os.getenv(
+                "FRIDAY_VOICE_LOOP_CAPTURE_COMMAND",
+                base.voice_loop_capture_command,
+            ),
+            voice_loop_poll_interval_sec=max(
+                1,
+                _parse_int(
+                    os.getenv("FRIDAY_VOICE_LOOP_POLL_INTERVAL_SEC"),
+                    base.voice_loop_poll_interval_sec,
+                ),
+            ),
+            voice_loop_require_wake_word=_parse_bool(
+                os.getenv("FRIDAY_VOICE_LOOP_REQUIRE_WAKE_WORD"),
+                base.voice_loop_require_wake_word,
+            ),
+            voice_loop_session_id=(
+                os.getenv("FRIDAY_VOICE_LOOP_SESSION_ID", base.voice_loop_session_id).strip()
+                or base.voice_loop_session_id
+            ),
+            voice_loop_mode=(
+                os.getenv("FRIDAY_VOICE_LOOP_MODE", base.voice_loop_mode).strip().lower()
+                or base.voice_loop_mode
             ),
             jarvis_plugins_dir=_parse_path(
                 os.getenv("FRIDAY_JARVIS_PLUGINS_DIR"),

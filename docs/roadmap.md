@@ -12,6 +12,7 @@
 
 - voice pipeline adapters wired to endpoints (implemented)
 - live voice websocket flow with interruption hooks (implemented)
+- always-on voice loop with wake-word gating and API controls (implemented)
 - model management endpoints (`list/pull/show`) (implemented)
 - repository context retrieval for code answers (implemented)
 - reminder due-event background worker (implemented)

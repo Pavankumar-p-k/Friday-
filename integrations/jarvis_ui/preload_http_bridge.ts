@@ -1,5 +1,5 @@
 import { contextBridge } from "electron";
-import type { JarvisApi, MissionMode } from "./source_copy/contracts";
+import type { JarvisApi, MissionMode } from "../shared/contracts";
 
 const API_BASE = process.env.FRIDAY_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -65,4 +65,3 @@ const api: JarvisApi = {
 };
 
 contextBridge.exposeInMainWorld("jarvisApi", api);
-

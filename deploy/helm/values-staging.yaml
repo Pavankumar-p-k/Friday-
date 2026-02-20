@@ -1,0 +1,22 @@
+global:
+  imageTag: latest
+
+config:
+  appName: FRIDAY Staging
+  engineCloudLlmEnabled: "false"
+
+api:
+  replicaCount: 1
+
+engine:
+  replicaCount: 1
+
+dashboard:
+  replicaCount: 1
+  ingress:
+    enabled: true
+    hosts:
+      - host: staging-friday.example.com
+        paths:
+          - path: /
+            pathType: Prefix

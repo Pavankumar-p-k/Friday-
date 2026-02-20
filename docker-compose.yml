@@ -1,0 +1,58 @@
+name: friday
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: ghcr.io/${GHCR_OWNER:-friday-local}/friday-api:${FRIDAY_IMAGE_TAG:-local}
+    env_file:
+      - .env
+    environment:
+      FRIDAY_DB_PATH: /data/sqlite/friday.db
+      FRIDAY_VOICE_INPUT_DIR: /data/voice/inbox
+      FRIDAY_VOICE_OUTPUT_DIR: /data/voice/out
+      FRIDAY_WORKSPACE_ROOT: /workspace
+    volumes:
+      - friday_data:/data
+      - ./:/workspace:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  assistant-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
+    image: ghcr.io/${GHCR_OWNER:-friday-local}/friday-engine:${FRIDAY_IMAGE_TAG:-local}
+    env_file:
+      - .env
+    environment:
+      FRIDAY_ENGINE_TTS_OUTPUT_DIR: /data/voice/out
+      FRIDAY_ENGINE_PRINT_EVENTS: "true"
+    volumes:
+      - friday_data:/data
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    image: ghcr.io/${GHCR_OWNER:-friday-local}/friday-dashboard:${FRIDAY_IMAGE_TAG:-local}
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      FRIDAY_API_UPSTREAM: http://api:8000
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  friday_data:

@@ -291,6 +291,15 @@ Request:
 }
 ```
 
+Response:
+
+```json
+{
+  "detected": true,
+  "wake_words": ["friday", "jarvis"]
+}
+```
+
 ## `POST /v1/voice/interrupt`
 
 Request:
@@ -311,6 +320,51 @@ Response:
 }
 ```
 
+## `GET /v1/voice/loop/state`
+
+Returns always-on loop state.
+
+Response:
+
+```json
+{
+  "running": true,
+  "session_id": "voice-loop",
+  "mode": "action",
+  "require_wake_word": true,
+  "poll_interval_sec": 2,
+  "wake_words": ["friday", "jarvis"],
+  "processed_count": 3,
+  "skipped_count": 1,
+  "last_transcript": "friday open notepad",
+  "last_command": "open notepad",
+  "last_reply": "Plan created with 1 step(s). Approval required for steps: none.",
+  "last_backend": "txt-fallback",
+  "last_error": "",
+  "started_at": "2026-02-12T12:00:00+00:00",
+  "updated_at": "2026-02-12T12:00:02+00:00"
+}
+```
+
+## `POST /v1/voice/loop/start`
+
+Request:
+
+```json
+{
+  "session_id": "voice-loop",
+  "mode": "action",
+  "require_wake_word": true,
+  "poll_interval_sec": 2
+}
+```
+
+Response: same shape as `GET /v1/voice/loop/state`.
+
+## `POST /v1/voice/loop/stop`
+
+Stops loop worker and returns the final loop state snapshot.
+
 ## `WS /v1/voice/live`
 
 Client messages:
@@ -328,15 +382,6 @@ Server events:
 - `barge_in.ack`
 - `final.result`
 - `session.stopped`
-
-Response:
-
-```json
-{
-  "detected": true,
-  "wake_words": ["friday", "jarvis"]
-}
-```
 
 ## `WS /v1/events`
 

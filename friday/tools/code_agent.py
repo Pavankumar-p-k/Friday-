@@ -35,8 +35,8 @@ class CodeAgentTool(Tool):
         context_snippet = ""
         citations: list[str] = []
         if path:
-            candidate = Path(path)
-            if candidate.exists() and candidate.is_file():
+            candidate = self._resolve_candidate(path, context.settings.workspace_root)
+            if candidate is not None and candidate.exists() and candidate.is_file():
                 try:
                     context_snippet = candidate.read_text(encoding="utf-8")[:2000]
                     try:
@@ -76,3 +76,16 @@ class CodeAgentTool(Tool):
                 "citations": citations,
             },
         )
+
+    def _resolve_candidate(self, path: str, workspace_root: Path) -> Path | None:
+        root = workspace_root.resolve()
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            candidate = (root / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None
+        return candidate

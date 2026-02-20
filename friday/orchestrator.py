@@ -24,10 +24,12 @@ from friday.schemas import (
     ExecuteRequest,
     Plan,
     PlanRequest,
+    PlanStep,
     PlanStatus,
     RunStatus,
     RunStepEvent,
     StepStatus,
+    ToolExecutionResult,
     VoiceCommandResponse,
     VoiceDispatchAction,
     VoiceDispatchResponse,
@@ -422,7 +424,7 @@ class Orchestrator:
             session_id=session_id,
             context=context or {},
         )
-        return VoiceDispatchResponse(
+        response = VoiceDispatchResponse(
             transcript=result.transcript,
             intent=result.intent.value,
             mode=result.mode,
@@ -442,6 +444,22 @@ class Orchestrator:
             cloud_attempts=result.cloud_attempts,
             warnings=result.warnings,
         )
+        self.storage.save_voice_history(
+            session_id=session_id,
+            transcript=response.transcript,
+            reply=response.reply,
+            mode=response.mode.value,
+            llm_backend=response.llm_backend,
+            stt_backend="transcribed-input",
+            tts_backend="none",
+            meta={
+                "intent": response.intent,
+                "used_cloud_fallback": response.used_cloud_fallback,
+                "local_attempts": response.local_attempts,
+                "cloud_attempts": response.cloud_attempts,
+            },
+        )
+        return response
 
     async def process_voice_command(
         self,
@@ -520,7 +538,7 @@ class Orchestrator:
         if tts.get("warning"):
             warnings.append(str(tts["warning"]))
 
-        return VoiceCommandResponse(
+        output = VoiceCommandResponse(
             transcript=text,
             reply=response.reply,
             plan=response.plan,
@@ -529,6 +547,72 @@ class Orchestrator:
             tts_backend=tts.get("backend", "none"),
             warnings=warnings,
         )
+        self.storage.save_voice_history(
+            session_id=session_id,
+            transcript=text,
+            reply=output.reply,
+            mode=mode.value,
+            llm_backend="orchestrator",
+            stt_backend="text",
+            tts_backend=output.tts_backend,
+            meta={"run_id": output.run_id or "", "plan_id": output.plan.id if output.plan else ""},
+        )
+        return output
+
+    async def execute_tool_action(
+        self,
+        *,
+        session_id: str,
+        actor: str,
+        tool: str,
+        args: dict[str, Any],
+    ) -> ToolExecutionResult:
+        planned = PlanStep(
+            id=f"adhoc_{uuid.uuid4().hex[:10]}",
+            description=f"Direct tool action via dashboard: {tool}",
+            tool=tool,
+            args=args,
+        )
+        decision = self.policy.evaluate(planned)
+        if not decision.allowed:
+            result = ToolExecutionResult(
+                success=False,
+                message=decision.reason or "Blocked by policy.",
+                data={"risk": decision.risk.value, "needs_approval": decision.needs_approval},
+            )
+            self.storage.save_action_history(
+                session_id=session_id,
+                actor=actor,
+                tool=tool,
+                args=args,
+                success=result.success,
+                message=result.message,
+                data=result.data,
+            )
+            return result
+
+        result = await self.registry.execute(tool, args)
+        self.storage.save_action_history(
+            session_id=session_id,
+            actor=actor,
+            tool=tool,
+            args=args,
+            success=result.success,
+            message=result.message,
+            data=result.data,
+        )
+        await self.events.publish(
+            {
+                "type": "dashboard.action.executed",
+                "timestamp": utc_now_iso(),
+                "session_id": session_id,
+                "actor": actor,
+                "tool": tool,
+                "success": result.success,
+                "message": result.message,
+            }
+        )
+        return result
 
     async def register_voice_session(
         self,

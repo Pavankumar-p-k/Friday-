@@ -51,3 +51,40 @@ def test_safe_shell_blocks_dangerous_term(tmp_path: Path) -> None:
     )
     decision = policy.evaluate(step)
     assert decision.allowed is False
+
+
+def test_safe_shell_blocks_control_operator(tmp_path: Path) -> None:
+    policy = PolicyEngine(_settings(tmp_path))
+    step = PlanStep(
+        id="s1",
+        description="Run chained command",
+        tool="safe_shell",
+        args={"command": "echo hello && whoami"},
+    )
+    decision = policy.evaluate(step)
+    assert decision.allowed is False
+
+
+def test_safe_shell_blocks_line_break(tmp_path: Path) -> None:
+    policy = PolicyEngine(_settings(tmp_path))
+    step = PlanStep(
+        id="s1",
+        description="Run multiline command",
+        tool="safe_shell",
+        args={"command": "echo hello\nwhoami"},
+    )
+    decision = policy.evaluate(step)
+    assert decision.allowed is False
+    assert "line break" in decision.reason.lower()
+
+
+def test_safe_shell_requires_exact_prefix_boundary(tmp_path: Path) -> None:
+    policy = PolicyEngine(_settings(tmp_path))
+    step = PlanStep(
+        id="s1",
+        description="Run near-match command",
+        tool="safe_shell",
+        args={"command": "python --versionx"},
+    )
+    decision = policy.evaluate(step)
+    assert decision.allowed is False
